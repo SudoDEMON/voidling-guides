@@ -28,6 +28,7 @@ const saveEditButton = document.querySelector('#saveEditButton');
 const cancelEditButton = document.querySelector('#cancelEditButton');
 const editMessage = document.querySelector('#editMessage');
 const requestList = document.querySelector('#requestList');
+const gameRequestList = document.querySelector('#gameRequestList');
 const pinList = document.querySelector('#pinList');
 const auditLog = document.querySelector('#auditLog');
 let editingRequestId = '';
@@ -141,6 +142,53 @@ function renderRequests(requests) {
   }
 }
 
+function renderGameRequests(requests) {
+  gameRequestList.replaceChildren();
+  if (requests.length === 0) gameRequestList.append(text('p', 'empty', 'No game requests yet.'));
+  for (const request of requests) {
+    const item = document.createElement('article');
+    item.className = 'request-item';
+    const top = document.createElement('div');
+    top.className = 'request-top';
+    top.append(text('h3', '', request.name));
+    top.append(text('span', 'status', request.status));
+    item.append(top);
+    item.append(text('p', 'meta', `${request.platform} · ${new Date(request.createdAt).toLocaleString()} · ${request.requestClient || 'unknown client'}`));
+    if (request.status === 'pending') {
+      const actions = document.createElement('div');
+      actions.className = 'request-actions';
+      const approve = text('button', 'use-button', 'Approve game');
+      const decline = text('button', 'use-button decline-request', 'Decline');
+      approve.type = 'button';
+      decline.type = 'button';
+      const buttons = [approve, decline];
+      const decide = async decision => {
+        for (const button of buttons) button.disabled = true;
+        try {
+          const state = await jsonFetch(`/dad/api/game-requests/${encodeURIComponent(request.id)}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ decision })
+          });
+          message(gameMessage, state.message, decision === 'approve' ? 'success' : '');
+          renderGames(state.games || []);
+          renderRequests(state.requests || []);
+          renderGameRequests(state.gameRequests || []);
+          renderLog(state.log || []);
+        } catch (error) {
+          if (error.status === 401) await loadState();
+          message(gameMessage, error.message, 'error');
+          for (const button of buttons) button.disabled = false;
+        }
+      };
+      approve.addEventListener('click', () => decide('approve'));
+      decline.addEventListener('click', () => decide('decline'));
+      actions.append(approve, decline);
+      item.append(actions);
+    }
+    gameRequestList.append(item);
+  }
+}
+
 function renderLog(entries) {
   auditLog.replaceChildren();
   if (entries.length === 0) auditLog.append(text('p', 'empty', 'The audit log is empty.'));
@@ -161,6 +209,7 @@ function renderState(state) {
   dashboard.hidden = false;
   renderGames(state.games || []);
   renderRequests(state.requests || []);
+  renderGameRequests(state.gameRequests || []);
   renderLog(state.log || []);
 }
 
@@ -202,6 +251,7 @@ pinForm.addEventListener('submit', async event => {
     message(approvalMessage, `${state.message} The child can request that badge now.`, 'success');
     renderGames(state.games || []);
     renderRequests(state.requests || []);
+    renderGameRequests(state.gameRequests || []);
     renderLog(state.log || []);
   } catch (error) {
     if (error.status === 401) await loadState();
@@ -225,6 +275,7 @@ gameForm.addEventListener('submit', async event => {
     renderGames(state.games || []);
     gameSelect.value = state.game.id;
     renderRequests(state.requests || []);
+    renderGameRequests(state.gameRequests || []);
     renderLog(state.log || []);
   } catch (error) {
     if (error.status === 401) await loadState();
@@ -249,6 +300,7 @@ editForm.addEventListener('submit', async event => {
     editPanel.hidden = true;
     renderGames(state.games || []);
     renderRequests(state.requests || []);
+    renderGameRequests(state.gameRequests || []);
     renderLog(state.log || []);
   } catch (error) {
     if (error.status === 401) await loadState();

@@ -64,6 +64,11 @@ It validates video URLs, metadata, captions, and public availability before
 updating the local catalog. After it succeeds, the child requests the exact
 badge name from the normal page.
 
+If a game is missing from the kids' dropdown, the child can submit its platform
+and full game name for Dad to review. This does not search YouTube or download
+anything. Dad can approve or decline it from `/dad`; approval adds the game to
+the dropdown, which refreshes automatically.
+
 The entire `/dad` route tree is enforced as loopback-only by the server. A
 request to `/dad` through any LAN address, including one made from the server
 itself, is returned as Not Found. Login uses an eight-hour in-memory session with an
@@ -127,6 +132,7 @@ for every request, so normal edits do not require a server restart.
 ## Request flow and safeguards
 
 1. The child can select only an approved game and enter a 2–64 character badge.
+   Missing games can be sent to Dad as a name-only approval request.
 2. The server rejects URLs, prompt-injection phrases, and clearly unsafe terms.
 3. `yt-dlp` searches for up to five candidates at a time using only the approved
    game and sanitized badge name. If a strict quoted search has no plausible
@@ -178,8 +184,9 @@ canonical YouTube URL, and the Antigravity selection response. Example:
 
 Completed videos and their library cards are deleted seven days after
 completion. Failed cards are deleted after 24 hours. The append-only request log
-is retained and is not affected by cleanup. There is no duration or total-size
-cap.
+is retained and is not affected by cleanup. Pending game requests remain until
+Dad reviews them; approved or declined requests are removed after 30 days. There
+is no duration or total-size cap.
 
 ## VOiDling mascot
 

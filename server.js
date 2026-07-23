@@ -14,7 +14,7 @@ const { loadCatalog, publicGames } = require('./src/catalog');
 const { convertGuide } = require('./src/converter');
 const { discoverGuide, needsClarification, validatePinnedGuide } = require('./src/discovery');
 const { addressAllowed, normalizeAddress } = require('./src/network');
-const { normalizeKey, slug, validateBadge } = require('./src/safety');
+const { normalizeKey, slug, stableId, validateBadge, validateGameName, validatePlatform } = require('./src/safety');
 const { ensureLocalCatalog, loadSettings } = require('./src/settings');
 const { LibraryStore } = require('./src/store');
 
@@ -33,6 +33,7 @@ const ALLOWED_CLIENTS = new Set(
 );
 const MAX_BODY = 16 * 1024;
 const MAX_QUEUED = 5;
+const MAX_PENDING_GAME_REQUESTS = 20;
 const REQUEST_COOLDOWN_MS = 30_000;
 const SAFE_FAILURE = "I couldn't find the exact guide. Please go get approval from your Dad for the video first.";
 const MIME = {
@@ -46,6 +47,7 @@ store.load();
 store.cleanup();
 const queue = [];
 const lastRequestByClient = new Map();
+const lastGameRequestByClient = new Map();
 let processing = false;
 
 function clientAllowed(req) {
@@ -113,6 +115,13 @@ function publicGuide(guide) {
     completedAt: guide.completedAt || null,
     suggestedBadge: guide.status === 'needs_confirmation' ? guide.suggestedBadge : null,
     mediaUrl: guide.status === 'complete' ? `/media/${encodeURIComponent(guide.id)}` : null
+  };
+}
+
+function publicGameRequest(request) {
+  return {
+    id: request.id, platform: request.platform, name: request.name,
+    status: request.status, createdAt: request.createdAt
   };
 }
 
@@ -342,6 +351,32 @@ async function handleRequest(req, res) {
   if (req.method === 'GET' && pathname === '/api/guides') {
     store.cleanup();
     return sendJson(res, 200, { guides: listPublicGuides() });
+  }
+  if (req.method === 'POST' && pathname === '/api/game-requests') {
+    const body = await readJson(req);
+    const platform = validatePlatform(body.platform);
+    const name = validateGameName(body.name);
+    const key = normalizeKey(`${platform}:${name}`);
+    if (loadCurrentCatalog().some(game => game.id === stableId(`${platform}:${name}`))) {
+      return sendJson(res, 409, { error: 'That game is already in the approved game list.' });
+    }
+    const duplicate = store.findPendingGameRequest(key);
+    if (duplicate) return sendJson(res, 200, { request: publicGameRequest(duplicate), duplicate: true });
+    if (store.state.gameRequests.filter(request => request.status === 'pending').length >= MAX_PENDING_GAME_REQUESTS) {
+      return sendJson(res, 429, { error: 'Dad already has several game requests to review. Please try later.' });
+    }
+    const address = normalizeAddress(req.socket.remoteAddress);
+    const last = lastGameRequestByClient.get(address) || 0;
+    if (Date.now() - last < REQUEST_COOLDOWN_MS) {
+      return sendJson(res, 429, { error: 'Please wait a moment before requesting another game.' });
+    }
+    lastGameRequestByClient.set(address, Date.now());
+    const request = store.addGameRequest({
+      id: crypto.randomUUID(), key, platform, name, status: 'pending',
+      createdAt: new Date().toISOString(), requestClient: address
+    });
+    audit.append('GAME_REQUESTED', { game: name, client: address, reason: `Requested platform ${platform}` });
+    return sendJson(res, 201, { request: publicGameRequest(request), duplicate: false });
   }
   if (req.method === 'POST' && pathname === '/api/requests') {
     const address = normalizeAddress(req.socket.remoteAddress);

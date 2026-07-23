@@ -5,7 +5,7 @@ const { AdminSessions, dadPostAllowed, verifyPassword } = require('./admin-auth'
 const { addApprovedGame, loadCatalog, upsertPinnedGuide } = require('./catalog');
 const { validatePinnedGuide } = require('./discovery');
 const { normalizeAddress } = require('./network');
-const { normalizeKey, validateBadge } = require('./safety');
+const { normalizeKey, stableId, validateBadge } = require('./safety');
 
 function createAdminController(options) {
   const sessions = new AdminSessions();
@@ -25,7 +25,16 @@ function createAdminController(options) {
         status: guide.status, message: guide.message, sourceTitle: guide.sourceTitle || '',
         requestClient: guide.requestClient || '', createdAt: guide.createdAt
       }));
-    return { games, requests, log: options.audit.recent(50) };
+    const gameRequests = options.store.state.gameRequests.slice()
+      .sort((a, b) => (a.status === 'pending' ? -1 : 1) - (b.status === 'pending' ? -1 : 1)
+        || Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, 40)
+      .map(request => ({
+        id: request.id, platform: request.platform, name: request.name,
+        status: request.status, createdAt: request.createdAt,
+        resolvedAt: request.resolvedAt || null, requestClient: request.requestClient || ''
+      }));
+    return { games, requests, gameRequests, log: options.audit.recent(50) };
   }
 
   function rejectMutation(req, res, action) {
@@ -136,6 +145,40 @@ function createAdminController(options) {
         game: game.name, client: normalizeAddress(req.socket.remoteAddress), reason: `Approved platform ${game.platform}`
       });
       options.sendJson(res, 201, { message: `Added ${game.name}.`, game, ...state() });
+      return true;
+    }
+    const gameRequestMatch = pathname.match(/^\/dad\/api\/game-requests\/([0-9a-f-]{36})$/i);
+    if (req.method === 'POST' && gameRequestMatch) {
+      if (rejectMutation(req, res, 'Game request review')) return true;
+      const request = options.store.state.gameRequests.find(item => item.id === gameRequestMatch[1]);
+      if (!request || request.status !== 'pending') {
+        options.sendJson(res, 409, { error: 'That game request is no longer waiting for review.' });
+        return true;
+      }
+      const body = await options.readJson(req);
+      if (!['approve', 'decline'].includes(body.decision)) {
+        options.sendJson(res, 400, { error: 'Choose Approve or Decline.' });
+        return true;
+      }
+      const resolvedAt = new Date().toISOString();
+      if (body.decision === 'approve') {
+        const gameId = stableId(`${request.platform}:${request.name}`);
+        const existing = loadCatalog(options.catalogPath).find(game => game.id === gameId);
+        const game = existing || addApprovedGame(options.catalogPath, request.platform, request.name);
+        options.store.updateGameRequest(request.id, { status: 'approved', resolvedAt, gameId: game.id });
+        options.audit.append('DAD_GAME_REQUEST_APPROVED', {
+          game: request.name, client: normalizeAddress(req.socket.remoteAddress),
+          reason: `Approved requested platform ${request.platform}`
+        });
+        options.sendJson(res, 200, { message: `Approved ${request.name}.`, ...state() });
+        return true;
+      }
+      options.store.updateGameRequest(request.id, { status: 'declined', resolvedAt });
+      options.audit.append('DAD_GAME_REQUEST_DECLINED', {
+        game: request.name, client: normalizeAddress(req.socket.remoteAddress),
+        reason: `Declined requested platform ${request.platform}`
+      });
+      options.sendJson(res, 200, { message: `Declined ${request.name}.`, ...state() });
       return true;
     }
     if (req.method === 'POST' && pathname === '/dad/api/pins') {

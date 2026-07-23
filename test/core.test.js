@@ -13,7 +13,12 @@ const { needsClarification, parseSelection, plausibleCandidates, validateMetadat
 const { addressAllowed, cidrContains } = require('../src/network');
 const { containsBlockedTerm, normalizeKey, validateBadge, validateGameName, validatePlatform } = require('../src/safety');
 const { loadSettings, writeSettings } = require('../src/settings');
-const { COMPLETE_TTL_MS, FAILED_TTL_MS, LibraryStore } = require('../src/store');
+const {
+  COMPLETE_TTL_MS,
+  FAILED_TTL_MS,
+  RESOLVED_GAME_REQUEST_TTL_MS,
+  LibraryStore
+} = require('../src/store');
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'voidling-guides-test-'));
@@ -197,6 +202,31 @@ test('store persists, marks interrupted work failed, and cleans retention', t =>
   const removed = reloaded.cleanup();
   assert.equal(removed.length, 2);
   assert.equal(fs.existsSync(video), false);
+});
+
+test('store migrates and retains game requests until Dad reviews them', t => {
+  const directory = temporaryDirectory(t);
+  const filePath = path.join(directory, 'library.json');
+  const now = Date.now();
+  fs.writeFileSync(filePath, `${JSON.stringify({ version: 1, guides: [] })}\n`);
+
+  const store = new LibraryStore(filePath, { now: () => now });
+  store.load();
+  assert.deepEqual(store.state.gameRequests, []);
+
+  store.addGameRequest({
+    id: 'pending', key: 'roblox:pending', platform: 'Roblox',
+    name: 'Pending', status: 'pending', createdAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS * 2).toISOString()
+  });
+  store.addGameRequest({
+    id: 'resolved', key: 'roblox:resolved', platform: 'Roblox',
+    name: 'Resolved', status: 'approved',
+    createdAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS * 2).toISOString(),
+    resolvedAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS - 1).toISOString()
+  });
+
+  store.cleanup();
+  assert.deepEqual(store.state.gameRequests.map(request => request.id), ['pending']);
 });
 
 test('audit log records requests and safely flattens fields', t => {

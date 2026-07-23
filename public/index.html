@@ -49,6 +49,25 @@
       <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
     </section>
 
+    <section class="game-request-panel" aria-labelledby="gameRequestTitle">
+      <details>
+        <summary id="gameRequestTitle">Don’t see your game? Request it from Dad</summary>
+        <p>This only sends Dad the platform and game name. It will not search for videos yet.</p>
+        <form id="gameRequestForm" autocomplete="off">
+          <label>
+            <span>Platform</span>
+            <input id="requestedPlatform" maxlength="32" value="Roblox" required>
+          </label>
+          <label>
+            <span>Full game name</span>
+            <input id="requestedGame" maxlength="100" placeholder="Game name" required>
+          </label>
+          <button type="submit" id="gameRequestButton">Ask Dad</button>
+        </form>
+        <p class="form-message" id="gameRequestMessage" role="status" aria-live="polite"></p>
+      </details>
+    </section>
+
     <section class="library" aria-labelledby="libraryTitle">
       <div class="section-head">
         <div>

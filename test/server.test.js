@@ -42,12 +42,18 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const approvedGame = parseCatalog(catalogText)[0];
   const confirmationId = '11111111-1111-4111-8111-111111111111';
   const completeId = '22222222-2222-4222-8222-222222222222';
+  const declineGameRequestId = '33333333-3333-4333-8333-333333333333';
   const completeFile = path.join(dataRoot, 'videos', 'sans.webm');
   fs.mkdirSync(dataRoot, { recursive: true });
   fs.mkdirSync(path.dirname(completeFile), { recursive: true });
   fs.writeFileSync(completeFile, 'test video');
   fs.writeFileSync(path.join(dataRoot, 'library.json'), `${JSON.stringify({
     version: 1,
+    gameRequests: [{
+      id: declineGameRequestId, key: 'roblox:decline-me', platform: 'Roblox',
+      name: 'Decline Me', status: 'pending', createdAt: '2026-07-22T00:30:00.000Z',
+      requestClient: '127.0.0.1'
+    }],
     guides: [{
       id: confirmationId,
       key: `${approvedGame.id}:sans-pending`,
@@ -92,6 +98,22 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const games = await gamesResponse.json();
   assert.equal(games.games[0].name, 'Become Tiky and Everything Else Again');
 
+  const kidGameRequest = await fetch(`http://127.0.0.1:${port}/api/game-requests`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'Roblox', name: 'Kid Requested Game' })
+  });
+  const kidGameRequestBody = await kidGameRequest.json();
+  assert.equal(kidGameRequest.status, 201);
+  assert.equal(kidGameRequestBody.request.name, 'Kid Requested Game');
+  assert.equal(Object.hasOwn(kidGameRequestBody.request, 'requestClient'), false);
+  assert.equal(Object.hasOwn(kidGameRequestBody.request, 'key'), false);
+
+  const duplicateGameRequest = await fetch(`http://127.0.0.1:${port}/api/game-requests`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'Roblox', name: 'Kid Requested Game' })
+  }).then(response => response.json());
+  assert.equal(duplicateGameRequest.duplicate, true);
+
   const index = await fetch(`http://127.0.0.1:${port}/`);
   const indexBody = await index.text();
   assert.match(indexBody, /Voidling Guides/);
@@ -127,7 +149,26 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.equal(unlocked.authenticated, true);
   assert.equal(unlocked.games[0].name, 'Become Tiky and Everything Else Again');
   assert.equal(unlocked.requests.find(request => request.id === confirmationId).suggestedBadge, 'Sans Skeleton');
+  assert.equal(unlocked.gameRequests.some(request => request.name === 'Kid Requested Game'), true);
   assert.equal(Array.isArray(unlocked.log), true);
+
+  const pendingKidRequest = unlocked.gameRequests.find(request => request.name === 'Kid Requested Game');
+  const approveGameRequest = await fetch(`${origin}/dad/api/game-requests/${pendingKidRequest.id}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
+    body: JSON.stringify({ decision: 'approve' })
+  });
+  const approvedGameState = await approveGameRequest.json();
+  assert.equal(approveGameRequest.status, 200);
+  assert.equal(approvedGameState.games.some(game => game.name === 'Kid Requested Game'), true);
+  assert.equal(approvedGameState.gameRequests.find(request => request.id === pendingKidRequest.id).status, 'approved');
+
+  const declineGameRequest = await fetch(`${origin}/dad/api/game-requests/${declineGameRequestId}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
+    body: JSON.stringify({ decision: 'decline' })
+  });
+  const declinedGameState = await declineGameRequest.json();
+  assert.equal(declineGameRequest.status, 200);
+  assert.equal(declinedGameState.gameRequests.find(request => request.id === declineGameRequestId).status, 'declined');
 
   const addGame = await fetch(`${origin}/dad/api/games`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },

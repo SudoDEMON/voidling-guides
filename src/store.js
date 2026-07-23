@@ -5,9 +5,10 @@ const path = require('path');
 
 const COMPLETE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FAILED_TTL_MS = 24 * 60 * 60 * 1000;
+const RESOLVED_GAME_REQUEST_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function defaultState() {
-  return { version: 1, guides: [] };
+  return { version: 1, guides: [], gameRequests: [] };
 }
 
 class LibraryStore {
@@ -28,6 +29,10 @@ class LibraryStore {
     }
     const nowIso = new Date(this.now()).toISOString();
     let changed = false;
+    if (!Array.isArray(this.state.gameRequests)) {
+      this.state.gameRequests = [];
+      changed = true;
+    }
     for (const guide of this.state.guides) {
       if (guide.status === 'queued' || ['searching', 'checking', 'downloading'].includes(guide.status)) {
         guide.status = 'failed';
@@ -71,6 +76,24 @@ class LibraryStore {
     return this.state.guides.find(guide => guide.key === key && ['queued', 'searching', 'checking', 'needs_confirmation', 'downloading', 'complete'].includes(guide.status));
   }
 
+  addGameRequest(request) {
+    this.state.gameRequests.push(request);
+    this.save();
+    return request;
+  }
+
+  updateGameRequest(id, changes) {
+    const request = this.state.gameRequests.find(item => item.id === id);
+    if (!request) throw new Error(`Unknown game request: ${id}`);
+    Object.assign(request, changes);
+    this.save();
+    return request;
+  }
+
+  findPendingGameRequest(key) {
+    return this.state.gameRequests.find(request => request.key === key && request.status === 'pending');
+  }
+
   cleanup() {
     const now = this.now();
     const kept = [];
@@ -89,10 +112,16 @@ class LibraryStore {
     }
     if (removed.length > 0) {
       this.state.guides = kept;
-      this.save();
     }
+    const gameRequestCount = this.state.gameRequests.length;
+    this.state.gameRequests = this.state.gameRequests.filter(request => {
+      if (request.status === 'pending') return true;
+      const resolved = Date.parse(request.resolvedAt || 0);
+      return !Number.isFinite(resolved) || now - resolved < RESOLVED_GAME_REQUEST_TTL_MS;
+    });
+    if (removed.length > 0 || this.state.gameRequests.length !== gameRequestCount) this.save();
     return removed;
   }
 }
 
-module.exports = { COMPLETE_TTL_MS, FAILED_TTL_MS, LibraryStore, defaultState };
+module.exports = { COMPLETE_TTL_MS, FAILED_TTL_MS, RESOLVED_GAME_REQUEST_TTL_MS, LibraryStore, defaultState };

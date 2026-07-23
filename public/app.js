@@ -5,6 +5,11 @@ const gameSelect = document.querySelector('#gameId');
 const badgeInput = document.querySelector('#badge');
 const requestButton = document.querySelector('#requestButton');
 const formMessage = document.querySelector('#formMessage');
+const gameRequestForm = document.querySelector('#gameRequestForm');
+const requestedPlatform = document.querySelector('#requestedPlatform');
+const requestedGame = document.querySelector('#requestedGame');
+const gameRequestButton = document.querySelector('#gameRequestButton');
+const gameRequestMessage = document.querySelector('#gameRequestMessage');
 const guideGrid = document.querySelector('#guideGrid');
 const refreshButton = document.querySelector('#refreshButton');
 const serverPill = document.querySelector('#serverPill');
@@ -41,6 +46,11 @@ function startMascot(url) {
 function setMessage(message, type = '') {
   formMessage.textContent = message;
   formMessage.className = `form-message ${type}`.trim();
+}
+
+function setGameRequestMessage(message, type = '') {
+  gameRequestMessage.textContent = message;
+  gameRequestMessage.className = `form-message ${type}`.trim();
 }
 
 function formatDuration(seconds) {
@@ -143,13 +153,25 @@ async function loadGames() {
   const response = await fetch('/api/games', { cache: 'no-store' });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Could not load approved games.');
+  const selected = gameSelect.value;
   gameSelect.replaceChildren();
+  if (body.games.length === 0) {
+    const option = document.createElement('option');
+    option.textContent = 'No approved games yet';
+    option.disabled = true;
+    option.selected = true;
+    gameSelect.append(option);
+    requestButton.disabled = true;
+    return;
+  }
   for (const game of body.games) {
     const option = document.createElement('option');
     option.value = game.id;
     option.textContent = `${game.platform}: ${game.name}`;
     gameSelect.append(option);
   }
+  if ([...gameSelect.options].some(option => option.value === selected)) gameSelect.value = selected;
+  requestButton.disabled = false;
 }
 
 async function loadGuides() {
@@ -195,7 +217,32 @@ form.addEventListener('submit', async event => {
   }
 });
 
+gameRequestForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  gameRequestButton.disabled = true;
+  setGameRequestMessage('Sending the game request to Dad...');
+  try {
+    const response = await fetch('/api/game-requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: requestedPlatform.value, name: requestedGame.value })
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || 'Could not request that game.');
+    requestedGame.value = '';
+    setGameRequestMessage(
+      body.duplicate ? 'Dad already has this game request.' : 'Request sent! Dad can approve it from his page.',
+      'success'
+    );
+  } catch (error) {
+    setGameRequestMessage(error.message, 'error');
+  } finally {
+    gameRequestButton.disabled = false;
+  }
+});
+
 refreshButton.addEventListener('click', () => loadGuides().catch(error => setMessage(error.message, 'error')));
 
 Promise.all([checkHealth(), loadGames(), loadGuides()]).catch(error => setMessage(error.message, 'error'));
 setInterval(() => loadGuides().catch(() => {}), 2500);
+setInterval(() => loadGames().catch(() => {}), 10_000);
