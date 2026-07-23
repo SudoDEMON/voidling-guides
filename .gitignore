@@ -1,0 +1,15 @@
+data/
+*.log
+node_modules/
+voidling-assets.zip
+
+# Local AI/project context
+project-memory.md
+project-journal.md
+AGENTS.md
+AGENT.md
+CLAUDE.md
+GEMINI.md
+MEMORY.md
+.codex/
+.grok/

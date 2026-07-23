@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dad Approval · Voidling Guides</title>
+  <link rel="stylesheet" href="/dad/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Voidling Guides home">
+      <span class="brand-mark">VG</span>
+      <span>Dad Approval</span>
+    </a>
+    <span class="local-pill">LOCALHOST ONLY</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">VOIDLING GUIDES · PARENT TOOLS</p>
+      <h1>Approve the right guide.</h1>
+      <p>Add a specific YouTube video to the approved catalog and review what the kids have requested.</p>
+    </section>
+
+    <section class="panel login-panel" id="loginPanel" hidden>
+      <p class="step">LOCKED</p>
+      <h2>Dad password</h2>
+      <p id="loginHelp">Sign in to view requests and approve videos.</p>
+      <form id="loginForm">
+        <label>
+          <span>Password</span>
+          <input id="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit" id="loginButton">Unlock</button>
+      </form>
+      <p class="message" id="loginMessage" role="status" aria-live="polite"></p>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <p class="step">MANUAL APPROVAL</p>
+            <h2>Pin a YouTube guide</h2>
+          </div>
+          <button class="quiet-button" id="logoutButton" type="button">Lock page</button>
+        </div>
+        <p class="panel-copy">The video is checked before it is saved. The child can then request this exact badge name.</p>
+        <form class="pin-form" id="pinForm">
+          <label>
+            <span>Approved game</span>
+            <select id="gameId" required></select>
+          </label>
+          <label>
+            <span>Full badge name</span>
+            <input id="badge" maxlength="64" placeholder="Sans Skeleton" required>
+          </label>
+          <label class="url-field">
+            <span>YouTube video URL</span>
+            <input id="videoUrl" type="url" placeholder="https://youtu.be/VIDEO_ID" required>
+          </label>
+          <button type="submit" id="approveButton">Check and approve</button>
+        </form>
+        <p class="message" id="approvalMessage" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <p class="step">APPROVED GAMES</p>
+        <h2>Add a game</h2>
+        <p class="panel-copy">New games appear in the kids’ dropdown immediately.</p>
+        <form class="game-form" id="gameForm">
+          <label>
+            <span>Platform</span>
+            <input id="newPlatform" maxlength="32" value="Roblox" required>
+          </label>
+          <label>
+            <span>Full game name</span>
+            <input id="newGameName" maxlength="100" placeholder="Full game name" required>
+          </label>
+          <button type="submit" id="addGameButton">Add approved game</button>
+        </form>
+        <p class="message" id="gameMessage" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel edit-panel" id="editPanel" hidden>
+        <p class="step">EDIT REQUEST</p>
+        <h2>Correct a library entry</h2>
+        <p class="panel-copy" id="editHelp"></p>
+        <form class="edit-form" id="editForm">
+          <label>
+            <span>Approved game</span>
+            <select id="editGameId" required></select>
+          </label>
+          <label>
+            <span>Correct badge name</span>
+            <input id="editBadge" maxlength="64" required>
+          </label>
+          <div class="form-actions">
+            <button type="submit" id="saveEditButton">Save correction</button>
+            <button class="quiet-button" type="button" id="cancelEditButton">Cancel</button>
+          </div>
+        </form>
+        <p class="message" id="editMessage" role="status" aria-live="polite"></p>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel">
+          <p class="step">RECENT REQUESTS</p>
+          <h2>What the kids asked for</h2>
+          <div class="request-list" id="requestList"></div>
+        </section>
+
+        <section class="panel">
+          <p class="step">APPROVED VIDEOS</p>
+          <h2>Current manual pins</h2>
+          <div class="pin-list" id="pinList"></div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <p class="step">AUDIT LOG</p>
+        <h2>Latest activity</h2>
+        <div class="audit-log" id="auditLog"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/dad/app.js" defer></script>
+</body>
+</html>

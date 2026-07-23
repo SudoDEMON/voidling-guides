@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voidling Guides</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Voidling Guides home">
+      <span class="brand-mark">VG</span>
+      <span>Voidling Guides</span>
+    </a>
+    <div class="server-pill" id="serverPill"><span></span><b id="serverStatus">Checking server...</b></div>
+  </header>
+
+  <main>
+    <div class="hero-layout">
+      <section class="hero">
+        <p class="eyebrow">LOCAL GUIDE LIBRARY</p>
+        <h1>What badge are you working on?</h1>
+        <p>Choose a game and ask for the badge guide. We’ll find it, save it here, and let you know when it’s ready.</p>
+      </section>
+      <div class="mascot" id="mascot" hidden>
+        <canvas id="mascotCanvas" width="192" height="208" role="img" aria-label="Voidling, your guide helper"></canvas>
+      </div>
+    </div>
+
+    <section class="request-panel" aria-labelledby="requestTitle">
+      <div class="panel-copy">
+        <p class="step">STEP 1</p>
+        <h2 id="requestTitle">Request a guide</h2>
+        <p>Only games Dad has approved appear in this list.</p>
+      </div>
+      <form id="requestForm" autocomplete="off">
+        <label>
+          <span>Game</span>
+          <select id="gameId" name="gameId" required>
+            <option value="">Loading approved games...</option>
+          </select>
+        </label>
+        <label>
+          <span>Badge name</span>
+          <input id="badge" name="badge" maxlength="64" placeholder="Verity" required>
+        </label>
+        <button type="submit" id="requestButton">Find my guide</button>
+      </form>
+      <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="library" aria-labelledby="libraryTitle">
+      <div class="section-head">
+        <div>
+          <p class="step">STEP 2</p>
+          <h2 id="libraryTitle">Watch your guides</h2>
+        </div>
+        <button class="refresh-button" id="refreshButton" type="button">Refresh</button>
+      </div>
+      <div class="guide-grid" id="guideGrid">
+        <div class="empty-card">No guides yet. Request one above!</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>Guides stay in this local library for seven days.</footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
