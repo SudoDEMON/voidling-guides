@@ -43,19 +43,21 @@ function containsBlockedTerm(value) {
   });
 }
 
-function validateBadge(value) {
-  const badge = collapseWhitespace(value).normalize('NFKC');
-  if (badge.length < 2 || badge.length > 64) {
-    throw new Error('Badge name must be between 2 and 64 characters.');
+function validateGuideName(value) {
+  const guideName = collapseWhitespace(value).normalize('NFKC');
+  if (guideName.length < 2 || guideName.length > 64) {
+    throw new Error('Guide name must be between 2 and 64 characters.');
   }
-  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s&'’().,!+_:\-]*$/u.test(badge)) {
-    throw new Error('Badge name contains unsupported characters.');
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s&'’().,!+_:\-]*$/u.test(guideName)) {
+    throw new Error('Guide name contains unsupported characters.');
   }
-  if (INJECTION_PATTERNS.some(pattern => pattern.test(badge)) || containsBlockedTerm(badge)) {
+  if (INJECTION_PATTERNS.some(pattern => pattern.test(guideName)) || containsBlockedTerm(guideName)) {
     throw new Error('That request is not allowed. Please ask Dad for help.');
   }
-  return badge;
+  return guideName;
 }
+
+const validateBadge = validateGuideName;
 
 function validateCatalogLabel(value, label, minimum, maximum) {
   const result = collapseWhitespace(value).normalize('NFKC');
@@ -111,6 +113,7 @@ module.exports = {
   slug,
   stableId,
   validateBadge,
+  validateGuideName,
   validateGameName,
   validatePlatform
 };

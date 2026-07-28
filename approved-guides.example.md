@@ -10,4 +10,4 @@ Each level-two heading uses this format:
 
 Optional pinned guides use this format beneath their game:
 
-<!-- - [Badge Name](https://www.youtube.com/watch?v=VIDEO_ID) -->
+<!-- - [Guide Name](https://www.youtube.com/watch?v=VIDEO_ID) -->

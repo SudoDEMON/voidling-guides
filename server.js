@@ -14,7 +14,7 @@ const { loadCatalog, publicGames } = require('./src/catalog');
 const { convertGuide } = require('./src/converter');
 const { discoverGuide, needsClarification, validatePinnedGuide } = require('./src/discovery');
 const { addressAllowed, normalizeAddress } = require('./src/network');
-const { normalizeKey, slug, stableId, validateBadge, validateGameName, validatePlatform } = require('./src/safety');
+const { normalizeKey, slug, stableId, validateGameName, validateGuideName, validatePlatform } = require('./src/safety');
 const { ensureLocalCatalog, loadSettings } = require('./src/settings');
 const { LibraryStore } = require('./src/store');
 
@@ -385,7 +385,7 @@ async function handleRequest(req, res) {
     const body = await readJson(req);
     const game = loadCurrentCatalog().find(item => item.id === String(body.gameId || ''));
     if (!game) return sendJson(res, 400, { error: 'Please choose an approved game.' });
-    const badge = validateBadge(body.badge);
+    const badge = validateGuideName(body.guide ?? body.badge);
     const duplicate = store.findDuplicate(`${game.id}:${normalizeKey(badge)}`);
     if (!duplicate && queuedCount() >= MAX_QUEUED) return sendJson(res, 429, { error: 'The guide queue is full. Please try again later.' });
     lastRequestByClient.set(address, Date.now());
@@ -415,7 +415,7 @@ async function handleRequest(req, res) {
     }
     const game = loadCurrentCatalog().find(item => item.id === guide.gameId);
     if (!game) return sendJson(res, 409, { error: 'That game is no longer approved.' });
-    const acceptedBadge = validateBadge(suggestedBadge);
+    const acceptedBadge = validateGuideName(suggestedBadge);
     const newKey = `${game.id}:${normalizeKey(acceptedBadge)}`;
     const duplicate = store.findDuplicate(newKey);
     if (duplicate && duplicate.id !== guide.id) {

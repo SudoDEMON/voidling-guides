@@ -2,7 +2,7 @@
 
 const form = document.querySelector('#requestForm');
 const gameSelect = document.querySelector('#gameId');
-const badgeInput = document.querySelector('#badge');
+const guideInput = document.querySelector('#guide');
 const requestButton = document.querySelector('#requestButton');
 const formMessage = document.querySelector('#formMessage');
 const gameRequestForm = document.querySelector('#gameRequestForm');
@@ -203,11 +203,11 @@ form.addEventListener('submit', async event => {
     const response = await fetch('/api/requests', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ gameId: gameSelect.value, badge: badgeInput.value })
+      body: JSON.stringify({ gameId: gameSelect.value, guide: guideInput.value })
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || 'Could not request that guide.');
-    badgeInput.value = '';
+    guideInput.value = '';
     setMessage(body.duplicate ? 'That guide is already in the library or on the way.' : 'Request added! You can watch it here when it is ready.', 'success');
     await loadGuides();
   } catch (error) {

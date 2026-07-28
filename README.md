@@ -1,7 +1,8 @@
 # Voidling Guides
 
-Voidling Guides is a kid-friendly LAN page for requesting game badge guides. It
-searches YouTube with a locked game/badge query, asks Google Antigravity to
+Voidling Guides is a kid-friendly LAN page for requesting game guides. A guide
+can cover a badge, character, morph, skin, secret, item, or mechanic. The app
+searches YouTube with a locked game/guide query, asks Google Antigravity to
 select an exact and apparently child-appropriate result, downloads it as a local
 WebM, and serves it without sending the child to YouTube.
 
@@ -59,10 +60,10 @@ http://127.0.0.1:3002/dad
 ```
 
 The page lets Dad add approved games, review and correct kid requests, inspect
-the append-only audit log, and add or replace a badge's approved YouTube video.
+the append-only audit log, and add or replace a guide's approved YouTube video.
 It validates video URLs, metadata, captions, and public availability before
 updating the local catalog. After it succeeds, the child requests the exact
-badge name from the normal page.
+guide name from the normal page.
 
 If a game is missing from the kids' dropdown, the child can submit its platform
 and full game name for Dad to review. This does not search YouTube or download
@@ -117,33 +118,34 @@ approves a game and adds it to the dropdown:
 ## Roblox: Example Game
 ```
 
-An optional Markdown link pins a Dad-approved video for a badge. Pinned videos
+An optional Markdown link pins a Dad-approved video for a guide. Pinned videos
 skip Antigravity selection but still receive YouTube metadata and file checks:
 
 ```markdown
-- [Example Badge](https://www.youtube.com/watch?v=VIDEO_ID)
+- [Example Guide](https://www.youtube.com/watch?v=VIDEO_ID)
 ```
 
 The application creates the local catalog from
 [`approved-guides.example.md`](approved-guides.example.md) on first start. Save
-manual edits, then request the exact badge name again. The catalog is re-read
+manual edits, then request the exact guide name again. The catalog is re-read
 for every request, so normal edits do not require a server restart.
 
 ## Request flow and safeguards
 
-1. The child can select only an approved game and enter a 2–64 character badge.
+1. The child can select only an approved game and enter a 2–64 character guide
+   name or topic.
    Missing games can be sent to Dad as a name-only approval request.
 2. The server rejects URLs, prompt-injection phrases, and clearly unsafe terms.
 3. `yt-dlp` searches for up to five candidates at a time using only the approved
-   game and sanitized badge name. If a strict quoted search has no plausible
+   game and sanitized guide name. If a strict quoted search has no plausible
    result, two natural-language query variants improve recall without widening
    the subject matter.
 4. Age-restricted, live, unavailable, unsafe-metadata, and unrelated candidates
    are rejected. Available English captions receive an additional term scan.
 5. `agy --mode plan --sandbox` receives only sanitized candidate metadata and
-   must return an exact result plus the complete canonical badge name.
+   must return an exact result plus the complete canonical guide name.
 6. If the complete name is more specific than the request, the page pauses and
-   asks **Did you mean this badge?**
+   asks **Did you mean this guide?**
    Nothing downloads until the child answers Yes. The prompt survives refreshes
    and server restarts, and both answers are recorded in the parent audit log.
 7. The chosen video is downloaded directly as VP9/Opus WebM when possible. A
@@ -160,7 +162,7 @@ and automated review cannot guarantee every externally created video's content.
 Use a pinned guide when a specific video needs explicit parental approval.
 
 Only one download runs at a time. Up to five more requests may wait in the
-queue, clients have a 30-second request cooldown, and duplicate game/badge
+queue, clients have a 30-second request cooldown, and duplicate game/guide
 requests reuse the existing job or video.
 
 ## Local data and audit log
@@ -170,16 +172,16 @@ Generated data is ignored by Git and stored under `data/`:
 - `data/library.json` — persistent job/library state
 - `data/settings.json` — local client allowlist/CIDR configuration
 - `data/approved-guides.md` — local approved games and pinned videos
-- `data/videos/<game>/<badge>.webm` — completed local guides
+- `data/videos/<game>/<guide>.webm` — completed local guides
 - `data/request-log.md` — append-only parent audit log
 - `data/admin-auth.json` — salted Dad password hash, readable only by this user
 
 The audit log is never served by the web application. It records request time,
-game, searched badge, requesting client IP, success/failure, the video served,
+game, searched guide, requesting client IP, success/failure, the video served,
 canonical YouTube URL, and the Antigravity selection response. Example:
 
 ```text
-[2026-01-01T18:30:00.000Z - SERVED - Example Game - Example Badge - Example guide title - client=192.168.1.42 - https://www.youtube.com/watch?v=VIDEO_ID - AGY=SELECT|SAFE|EXACT|VIDEO_ID|Example Badge|Exact guide]
+[2026-01-01T18:30:00.000Z - SERVED - Example Game - Example Guide - Example guide title - client=192.168.1.42 - https://www.youtube.com/watch?v=VIDEO_ID - AGY=SELECT|SAFE|EXACT|VIDEO_ID|Example Guide|Exact guide]
 ```
 
 Completed videos and their library cards are deleted seven days after

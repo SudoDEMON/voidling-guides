@@ -10,7 +10,7 @@ const dashboard = document.querySelector('#dashboard');
 const logoutButton = document.querySelector('#logoutButton');
 const pinForm = document.querySelector('#pinForm');
 const gameSelect = document.querySelector('#gameId');
-const badgeInput = document.querySelector('#badge');
+const guideInput = document.querySelector('#guide');
 const videoUrlInput = document.querySelector('#videoUrl');
 const approveButton = document.querySelector('#approveButton');
 const approvalMessage = document.querySelector('#approvalMessage');
@@ -23,7 +23,7 @@ const editPanel = document.querySelector('#editPanel');
 const editForm = document.querySelector('#editForm');
 const editHelp = document.querySelector('#editHelp');
 const editGameSelect = document.querySelector('#editGameId');
-const editBadgeInput = document.querySelector('#editBadge');
+const editGuideInput = document.querySelector('#editGuide');
 const saveEditButton = document.querySelector('#saveEditButton');
 const cancelEditButton = document.querySelector('#cancelEditButton');
 const editMessage = document.querySelector('#editMessage');
@@ -86,9 +86,9 @@ function renderGames(games) {
     edit.type = 'button';
     edit.addEventListener('click', () => {
       gameSelect.value = pin.game.id;
-      badgeInput.value = pin.badge;
+      guideInput.value = pin.badge;
       videoUrlInput.value = pin.url;
-      badgeInput.focus();
+      guideInput.focus();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     item.append(edit);
@@ -116,7 +116,7 @@ function renderRequests(requests) {
     use.type = 'button';
     use.addEventListener('click', () => {
       gameSelect.value = request.gameId;
-      badgeInput.value = request.suggestedBadge || request.badge;
+      guideInput.value = request.suggestedBadge || request.badge;
       videoUrlInput.focus();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -128,10 +128,10 @@ function renderRequests(requests) {
     edit.addEventListener('click', () => {
       editingRequestId = request.id;
       editGameSelect.value = request.gameId;
-      editBadgeInput.value = request.suggestedBadge || request.badge;
+      editGuideInput.value = request.suggestedBadge || request.badge;
       editHelp.textContent = request.status === 'complete'
         ? 'This renames the existing playable library card.'
-        : 'Saving retries this request under the corrected game and badge name.';
+        : 'Saving retries this request under the corrected game and guide name.';
       message(editMessage, '');
       editPanel.hidden = false;
       editPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -244,11 +244,11 @@ pinForm.addEventListener('submit', async event => {
   try {
     const state = await jsonFetch('/dad/api/pins', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ gameId: gameSelect.value, badge: badgeInput.value, url: videoUrlInput.value })
+      body: JSON.stringify({ gameId: gameSelect.value, guide: guideInput.value, url: videoUrlInput.value })
     });
-    badgeInput.value = '';
+    guideInput.value = '';
     videoUrlInput.value = '';
-    message(approvalMessage, `${state.message} The child can request that badge now.`, 'success');
+    message(approvalMessage, `${state.message} The child can request that guide now.`, 'success');
     renderGames(state.games || []);
     renderRequests(state.requests || []);
     renderGameRequests(state.gameRequests || []);
@@ -293,7 +293,7 @@ editForm.addEventListener('submit', async event => {
   try {
     const state = await jsonFetch(`/dad/api/requests/${encodeURIComponent(editingRequestId)}`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ gameId: editGameSelect.value, badge: editBadgeInput.value })
+      body: JSON.stringify({ gameId: editGameSelect.value, guide: editGuideInput.value })
     });
     message(approvalMessage, state.message, 'success');
     editingRequestId = '';

@@ -117,6 +117,8 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const index = await fetch(`http://127.0.0.1:${port}/`);
   const indexBody = await index.text();
   assert.match(indexBody, /Voidling Guides/);
+  assert.match(indexBody, /What guide are you looking for/);
+  assert.match(indexBody, /id="guide"/);
   assert.match(indexBody, /href="\/"/);
   assert.doesNotMatch(indexBody, /(?:127\.0\.0\.1|localhost):\d+/);
   assert.match(index.headers.get('content-security-policy'), /default-src 'self'/);
@@ -124,6 +126,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const browserScript = await fetch(`http://127.0.0.1:${port}/app.js`).then(response => response.text());
   assert.doesNotMatch(browserScript, /(?:127\.0\.0\.1|localhost):\d+/);
   assert.match(browserScript, /fetch\('\/api\/games'/);
+  assert.match(browserScript, /guide: guideInput\.value/);
 
   const dadPage = await fetch(`http://127.0.0.1:${port}/dad`);
   assert.equal(dadPage.status, 200);
@@ -181,7 +184,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
 
   const editRequest = await fetch(`${origin}/dad/api/requests/${completeId}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
-    body: JSON.stringify({ gameId: approvedGame.id, badge: 'Sans Skeleton' })
+    body: JSON.stringify({ gameId: approvedGame.id, guide: 'Sans Skeleton' })
   });
   const editedState = await editRequest.json();
   assert.equal(editRequest.status, 200);
@@ -189,7 +192,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
 
   const invalidPin = await fetch(`${origin}/dad/api/pins`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
-    body: JSON.stringify({ gameId: unlocked.games[0].id, badge: 'Test Badge', url: 'https://example.com/video' })
+    body: JSON.stringify({ gameId: unlocked.games[0].id, guide: 'Test Guide', url: 'https://example.com/video' })
   });
   assert.equal(invalidPin.status, 400);
 

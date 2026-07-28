@@ -5,7 +5,7 @@ const { AdminSessions, dadPostAllowed, verifyPassword } = require('./admin-auth'
 const { addApprovedGame, loadCatalog, upsertPinnedGuide } = require('./catalog');
 const { validatePinnedGuide } = require('./discovery');
 const { normalizeAddress } = require('./network');
-const { normalizeKey, stableId, validateBadge } = require('./safety');
+const { normalizeKey, stableId, validateGuideName } = require('./safety');
 
 function createAdminController(options) {
   const sessions = new AdminSessions();
@@ -59,7 +59,7 @@ function createAdminController(options) {
     const body = await options.readJson(req);
     const game = loadCatalog(options.catalogPath).find(item => item.id === String(body.gameId || ''));
     if (!game) return options.sendJson(res, 400, { error: 'Please choose an approved game.' });
-    const badge = validateBadge(body.badge);
+    const badge = validateGuideName(body.guide ?? body.badge);
     const key = `${game.id}:${normalizeKey(badge)}`;
     const duplicate = options.store.findDuplicate(key);
     if (duplicate && duplicate.id !== guide.id) {
@@ -189,7 +189,7 @@ function createAdminController(options) {
         options.sendJson(res, 400, { error: 'Please choose an approved game.' });
         return true;
       }
-      const badge = validateBadge(body.badge);
+      const badge = validateGuideName(body.guide ?? body.badge);
       const selected = await validatePinnedGuide(body.url);
       const result = upsertPinnedGuide(options.catalogPath, game.id, badge, selected.webpageUrl);
       options.audit.append(result.replaced ? 'DAD_PIN_REPLACED' : 'DAD_PIN_ADDED', {
