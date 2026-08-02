@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { AdminSessions, dadPostAllowed, verifyPassword } = require('./admin-auth');
@@ -9,6 +10,32 @@ const {
 const { validatePinnedGuide } = require('./discovery');
 const { normalizeAddress } = require('./network');
 const { normalizeKey, stableId, validateGuideName } = require('./safety');
+
+function queueApprovedGuide(options, game, badge, selected, client) {
+  const key = `${game.id}:${normalizeKey(badge)}`;
+  const existing = options.store.state.guides.filter(guide => guide.key === key).at(-1) || null;
+  const createdAt = new Date().toISOString();
+  const approvedSelection = {
+    id: selected.id, title: selected.title, channel: selected.channel,
+    duration: selected.duration, webpageUrl: selected.webpageUrl,
+    canonicalBadge: badge, selectionReason: 'Dad-approved URL',
+    antigravityResponse: 'PINNED: Dad-approved URL override'
+  };
+  const fields = {
+    key, gameId: game.id, game: game.name, platform: game.platform, badge,
+    status: 'queued', message: 'Dad approved this video. Waiting to download...',
+    createdAt, requestClient: client, filePath: options.outputPathFor(game, badge),
+    approvedSelection, pendingSelection: null, suggestedBadge: null,
+    sourceTitle: selected.title, channel: selected.channel,
+    forceDownload: true, completedAt: null, finishedAt: null,
+    duration: null, size: null, codecs: null, internalError: null
+  };
+  const guide = existing
+    ? options.store.update(existing.id, fields)
+    : options.store.add({ id: crypto.randomUUID(), ...fields });
+  options.enqueue(guide.id);
+  return { guide, reused: Boolean(existing) };
+}
 
 function createAdminController(options) {
   const sessions = new AdminSessions();
@@ -238,14 +265,25 @@ function createAdminController(options) {
         return true;
       }
       const badge = validateGuideName(body.guide ?? body.badge);
+      const key = `${game.id}:${normalizeKey(badge)}`;
+      const busy = options.store.state.guides.find(guide => guide.key === key && busyStatuses.has(guide.status));
+      if (busy) {
+        options.sendJson(res, 409, { error: 'Wait for the current guide download to finish before replacing its video.' });
+        return true;
+      }
       const selected = await validatePinnedGuide(body.url);
       const result = upsertPinnedGuide(options.catalogPath, game.id, badge, selected.webpageUrl);
+      const client = normalizeAddress(req.socket.remoteAddress);
+      const queued = queueApprovedGuide(options, game, badge, selected, client);
       options.audit.append(result.replaced ? 'DAD_PIN_REPLACED' : 'DAD_PIN_ADDED', {
-        game: game.name, badge, client: normalizeAddress(req.socket.remoteAddress),
-        video: selected.title, url: selected.webpageUrl, reason: 'Password-protected Dad portal'
+        game: game.name, badge, client,
+        video: selected.title, url: selected.webpageUrl,
+        reason: queued.reused ? 'Approved URL and refreshed library download' : 'Approved URL and queued library download'
       });
       options.sendJson(res, result.replaced ? 200 : 201, {
-        message: result.replaced ? `Updated the approved video for ${badge}.` : `Approved ${badge}.`,
+        message: result.replaced
+          ? `Updated ${badge}. The approved video is downloading now.`
+          : `Approved ${badge}. The video is downloading now.`,
         pin: { gameId: game.id, badge, url: selected.webpageUrl, title: selected.title }, ...state()
       });
       return true;
@@ -297,4 +335,4 @@ function createAdminController(options) {
   return { handle, state };
 }
 
-module.exports = { createAdminController };
+module.exports = { createAdminController, queueApprovedGuide };

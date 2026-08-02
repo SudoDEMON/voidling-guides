@@ -323,7 +323,7 @@ pinForm.addEventListener('submit', async event => {
     });
     guideInput.value = '';
     videoUrlInput.value = '';
-    message(approvalMessage, `${state.message} The child can request that guide now.`, 'success');
+    message(approvalMessage, state.message, 'success');
     renderGames(state.games || []);
     renderRequests(state.requests || []);
     renderGameRequests(state.gameRequests || []);

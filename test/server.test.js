@@ -139,6 +139,12 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.doesNotMatch(browserScript, /(?:127\.0\.0\.1|localhost):\d+/);
   assert.match(browserScript, /fetch\('\/api\/games'/);
   assert.match(browserScript, /guide: guideInput\.value/);
+  assert.match(browserScript, /MASCOT_FRAME_COUNT = 6/);
+  assert.match(browserScript, /MASCOT_ROW = 7/);
+  assert.match(browserScript, /MASCOT_FRAME_WIDTH = 192/);
+  const mascotAsset = fs.readFileSync(path.join(root, 'public', 'voidling-current-pet-spritesheet.png'));
+  assert.equal(mascotAsset.readUInt32BE(16), 1536);
+  assert.equal(mascotAsset.readUInt32BE(20), 1872);
 
   const dadPage = await fetch(`${dadOrigin}/dad`);
   assert.equal(dadPage.status, 200);
@@ -146,6 +152,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.match(dadPageBody, /Dad Approval/);
   assert.match(dadPageBody, /id="approvedGameList"/);
   assert.match(dadPageBody, /permanently deletes its downloaded WebM file/);
+  assert.match(dadPageBody, /immediately downloaded into the kids’ guide library/);
   const dadScript = await fetch(`${dadOrigin}/dad/app.js`).then(response => response.text());
   assert.match(dadScript, /method: 'DELETE'/);
   assert.match(dadScript, /Remove entry & video/);

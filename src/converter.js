@@ -50,10 +50,10 @@ async function transcodedWebm(url, target, runImpl, onOutput) {
   }
 }
 
-async function convertGuide({ url, outputPath, onOutput, run: runOverride }) {
+async function convertGuide({ url, outputPath, overwrite = false, onOutput, run: runOverride }) {
   const runImpl = runOverride || run;
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+  if (!overwrite && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
     return probeWebm(outputPath, { run: runImpl });
   }
 

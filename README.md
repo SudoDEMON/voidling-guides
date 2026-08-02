@@ -63,8 +63,9 @@ http://192.168.1.50:3002/dad
 The page lets Dad add approved games, review and correct kid requests, inspect
 the append-only audit log, and add or replace a guide's approved YouTube video.
 It validates video URLs, metadata, captions, and public availability before
-updating the local catalog. After it succeeds, the child requests the exact
-guide name from the normal page.
+updating the local catalog. After approval succeeds, the app immediately queues
+the video for download and serves it from the kids' library when conversion
+finishes; the child does not need to submit a second request.
 
 Dad can also remove manually approved video links, game requests, guide/library
 entries, and approved games. Every removal asks for confirmation and is written
@@ -141,8 +142,10 @@ skip Antigravity selection but still receive YouTube metadata and file checks:
 
 The application creates the local catalog from
 [`approved-guides.example.md`](approved-guides.example.md) on first start. Save
-manual edits, then request the exact guide name again. The catalog is re-read
-for every request, so normal edits do not require a server restart.
+manual edits, then request the exact guide name. Direct edits remain passive;
+using the Dad Approval form instead validates and downloads the video
+immediately. The catalog is re-read for every request, so normal edits do not
+require a server restart.
 
 ## Request flow and safeguards
 
@@ -206,12 +209,12 @@ is no duration or total-size cap.
 
 ## VOiDling mascot
 
-The active 1536×1872 RGBA sprite sheet is stored at `public/voidling.png`. The
-page animates the six-frame standing/idle row on a canvas. The original supplied
-`voidling-assets.zip` stays local and is ignored by Git.
-
-To replace the mascot later, use another 8-column sheet with 192×208 cells or
-update the frame coordinates in `public/app.js`.
+The active 1536×1872 transparent sprite sheet is stored at
+`public/voidling-current-pet-spritesheet.png`; its grid has eight columns, nine
+rows, and 192×208 cells. The homepage animates the first six frames of the
+typing row (zero-based row `7`). The original supplied `voidling-assets.zip`
+stays local and is ignored by Git. See `public/README.md` for the complete sheet
+layout.
 
 ## Development
 

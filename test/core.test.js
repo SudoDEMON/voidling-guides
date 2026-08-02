@@ -6,6 +6,7 @@ const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { dadPostAllowed, verifyPassword, writePassword } = require('../src/admin-auth');
+const { queueApprovedGuide } = require('../src/admin-controller');
 const { RequestAudit } = require('../src/audit');
 const {
   addApprovedGame, parseCatalog, removeApprovedGame, removePinnedGuide, upsertPinnedGuide
@@ -79,6 +80,39 @@ test('Dad can add a validated approved game', t => {
   assert.equal(added.name, 'Another Game');
   assert.equal(parseCatalog(fs.readFileSync(catalogPath, 'utf8')).length, 2);
   assert.throws(() => addApprovedGame(catalogPath, 'Roblox', 'Another Game'), /already approved/i);
+});
+
+test('Dad URL approval immediately queues and refreshes one library entry', t => {
+  const directory = temporaryDirectory(t);
+  const store = new LibraryStore(path.join(directory, 'library.json'));
+  store.load();
+  const game = { id: 'roblox-test-a1b2c3d4', platform: 'Roblox', name: 'Test Game' };
+  const selected = {
+    id: 'SaPy5eZrv34', title: 'Exact approved guide', channel: 'Guide Maker',
+    duration: 150, webpageUrl: 'https://www.youtube.com/watch?v=SaPy5eZrv34'
+  };
+  const enqueued = [];
+  const options = {
+    store,
+    outputPathFor: (_game, badge) => path.join(directory, `${badge}.webm`),
+    enqueue: id => enqueued.push(id)
+  };
+
+  const first = queueApprovedGuide(options, game, 'Verity', selected, '192.0.2.14');
+  assert.equal(first.reused, false);
+  assert.equal(first.guide.status, 'queued');
+  assert.equal(first.guide.forceDownload, true);
+  assert.equal(first.guide.approvedSelection.webpageUrl, selected.webpageUrl);
+  assert.deepEqual(enqueued, [first.guide.id]);
+
+  store.update(first.guide.id, { status: 'complete' });
+  const refreshed = queueApprovedGuide(options, game, 'Verity', { ...selected, title: 'Replacement guide' }, '192.0.2.14');
+  assert.equal(refreshed.reused, true);
+  assert.equal(refreshed.guide.id, first.guide.id);
+  assert.equal(refreshed.guide.status, 'queued');
+  assert.equal(refreshed.guide.sourceTitle, 'Replacement guide');
+  assert.equal(store.state.guides.length, 1);
+  assert.deepEqual(enqueued, [first.guide.id, first.guide.id]);
 });
 
 test('Dad password is salted, hashed, private, and verifiable', t => {
@@ -200,11 +234,14 @@ test('metadata rejects age restrictions and live video', () => {
 test('converter writes a verified WebM atomically', async t => {
   const directory = temporaryDirectory(t);
   const outputPath = path.join(directory, 'game', 'verity.webm');
+  let payload = 'fake-webm';
+  let downloads = 0;
   const fakeRun = async (command, args) => {
     if (command === 'yt-dlp') {
+      downloads += 1;
       const target = args[args.indexOf('-o') + 1];
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, 'fake-webm');
+      fs.writeFileSync(target, payload);
       return { stdout: '', stderr: '' };
     }
     if (command === 'ffprobe') {
@@ -215,6 +252,15 @@ test('converter writes a verified WebM atomically', async t => {
   const result = await convertGuide({ url: 'https://www.youtube.com/watch?v=Bo9d4rB2IuQ', outputPath, run: fakeRun });
   assert.equal(result.duration, 117);
   assert.equal(fs.readFileSync(outputPath, 'utf8'), 'fake-webm');
+  assert.equal(downloads, 1);
+  await convertGuide({ url: 'https://www.youtube.com/watch?v=Bo9d4rB2IuQ', outputPath, run: fakeRun });
+  assert.equal(downloads, 1);
+  payload = 'replacement-webm';
+  await convertGuide({
+    url: 'https://www.youtube.com/watch?v=SaPy5eZrv34', outputPath, overwrite: true, run: fakeRun
+  });
+  assert.equal(downloads, 2);
+  assert.equal(fs.readFileSync(outputPath, 'utf8'), 'replacement-webm');
   assert.equal(fs.readdirSync(path.dirname(outputPath)).some(name => name.includes('.part-')), false);
 });
 

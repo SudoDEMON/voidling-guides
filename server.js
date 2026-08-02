@@ -142,7 +142,8 @@ function dependencyHealth() {
 }
 
 function mascotUrl() {
-  const name = ['voidling.png', 'voidling.webp', 'voidling.gif'].find(file => fs.existsSync(path.join(PUBLIC_ROOT, file)));
+  const name = ['voidling-current-pet-spritesheet.png', 'voidling.png', 'voidling.webp', 'voidling.gif']
+    .find(file => fs.existsSync(path.join(PUBLIC_ROOT, file)));
   return name ? `/${name}` : null;
 }
 
@@ -209,6 +210,7 @@ async function processGuide(id) {
     const media = await convertGuide({
       url: selected.webpageUrl,
       outputPath: guide.filePath,
+      overwrite: Boolean(guide.forceDownload),
       onOutput: (stream, text) => {
         if (stream === 'stderr' && /\b(?:ERROR|failed)\b/i.test(text)) console.error(`[${id}] ${text.trim()}`);
       }
@@ -219,7 +221,9 @@ async function processGuide(id) {
       finishedAt: completedAt,
       duration: media.duration,
       size: media.size,
-      codecs: media.codecs
+      codecs: media.codecs,
+      sourceUrl: selected.webpageUrl,
+      forceDownload: false
     });
     audit.append('SERVED', {
       game: guide.game, badge: guide.badge, client: guide.requestClient,
@@ -257,12 +261,14 @@ function createRequest(game, badge, client) {
     audit.append('DUPLICATE', { game: game.name, badge, client, video: duplicate.sourceTitle || duplicate.status });
     return { guide: duplicate, duplicate: true };
   }
-  for (const old of store.state.guides.filter(item => item.key === key && item.status === 'failed')) store.remove(old.id);
+  const failed = store.state.guides.filter(item => item.key === key && item.status === 'failed');
+  const forceDownload = failed.some(old => old.forceDownload);
+  for (const old of failed) store.remove(old.id);
   const createdAt = new Date().toISOString();
   const guide = store.add({
     id: crypto.randomUUID(), key, gameId: game.id, game: game.name, platform: game.platform,
     badge, status: 'queued', message: 'Waiting for a turn...', createdAt, requestClient: client,
-    filePath: outputPathFor(game, badge)
+    filePath: outputPathFor(game, badge), forceDownload
   });
   queue.push(guide.id);
   audit.append('REQUESTED', { game: game.name, badge, client, video: 'PENDING' });
@@ -288,6 +294,7 @@ const adminController = createAdminController({
 function serveStatic(req, res, pathname) {
   const files = {
     '/': 'index.html', '/styles.css': 'styles.css', '/app.js': 'app.js',
+    '/voidling-current-pet-spritesheet.png': 'voidling-current-pet-spritesheet.png',
     '/voidling.png': 'voidling.png', '/voidling.webp': 'voidling.webp', '/voidling.gif': 'voidling.gif',
     '/dad': 'dad.html', '/dad/': 'dad.html', '/dad/styles.css': 'dad.css', '/dad/app.js': 'dad.js'
   };

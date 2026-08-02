@@ -18,23 +18,34 @@ const mascot = document.querySelector('#mascot');
 const mascotCanvas = document.querySelector('#mascotCanvas');
 let lastGuideJson = '';
 let mascotStarted = false;
+const MASCOT_FRAME_COUNT = 6;
+const MASCOT_FRAMES = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1];
+const MASCOT_FRAME_WIDTH = 192;
+const MASCOT_FRAME_HEIGHT = 208;
+const MASCOT_ROW = 7;
 
 function startMascot(url) {
   if (!url || mascotStarted || !mascotCanvas) return;
   mascotStarted = true;
   const context = mascotCanvas.getContext('2d');
   const sheet = new Image();
-  const frames = [0, 1, 2, 3, 2, 1, 0, 0, 4, 5, 4, 0];
   let index = 0;
   let previous = 0;
   sheet.onload = () => {
+    mascotCanvas.width = MASCOT_FRAME_WIDTH;
+    mascotCanvas.height = MASCOT_FRAME_HEIGHT;
     mascot.hidden = false;
     const draw = timestamp => {
-      if (timestamp - previous >= 230) {
+      if (timestamp - previous >= 180) {
         previous = timestamp;
-        context.clearRect(0, 0, 192, 208);
-        context.drawImage(sheet, frames[index] * 192, 6 * 208, 192, 208, 0, 0, 192, 208);
-        index = (index + 1) % frames.length;
+        context.clearRect(0, 0, mascotCanvas.width, mascotCanvas.height);
+        context.drawImage(
+          sheet,
+          MASCOT_FRAMES[index] * MASCOT_FRAME_WIDTH, MASCOT_ROW * MASCOT_FRAME_HEIGHT,
+          MASCOT_FRAME_WIDTH, MASCOT_FRAME_HEIGHT,
+          0, 0, mascotCanvas.width, mascotCanvas.height
+        );
+        index = (index + 1) % MASCOT_FRAMES.length;
       }
       requestAnimationFrame(draw);
     };
