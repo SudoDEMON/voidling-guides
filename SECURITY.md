@@ -14,3 +14,8 @@ transit. Keep the service on a trusted LAN with a matching host firewall rule;
 use an HTTPS reverse proxy or trusted VPN before exposing it to any untrusted
 network. Avoid the `*` client rule unless the surrounding network boundary is
 equally restrictive.
+
+Dad removal actions require the authenticated session and exact same-origin JSON
+requests. Deleting a library video is restricted to the configured managed
+videos directory, and deleting a game is blocked while related library entries
+exist. Removal events remain in the append-only audit log.

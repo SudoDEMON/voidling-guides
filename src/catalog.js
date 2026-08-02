@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { normalizeKey, stableId, validateGameName, validatePlatform } = require('./safety');
+const { normalizeKey, stableId, validateGameName, validateGuideName, validatePlatform } = require('./safety');
 
 function parseCatalog(markdown) {
   const games = [];
@@ -64,6 +64,15 @@ function addApprovedGame(filePath, platformValue, nameValue) {
   return { id, platform, name, pinned: {} };
 }
 
+function gameSection(lines, game) {
+  const targetHeading = `## ${game.platform}: ${game.name}`;
+  const start = lines.findIndex(line => line.trim() === targetHeading);
+  if (start < 0) throw new Error('The approved game heading could not be found.');
+  let end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
+  if (end < 0) end = lines.length;
+  return { start, end };
+}
+
 function upsertPinnedGuide(filePath, gameId, badge, url) {
   const markdown = fs.readFileSync(filePath, 'utf8');
   const games = parseCatalog(markdown);
@@ -71,11 +80,7 @@ function upsertPinnedGuide(filePath, gameId, badge, url) {
   if (!game) throw new Error('Please choose an approved game.');
 
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
-  const targetHeading = `## ${game.platform}: ${game.name}`;
-  const start = lines.findIndex(line => line.trim() === targetHeading);
-  if (start < 0) throw new Error('The approved game heading could not be found.');
-  let end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
-  if (end < 0) end = lines.length;
+  let { start, end } = gameSection(lines, game);
 
   const badgeKey = normalizeKey(badge);
   const replacement = `- [${badge}](${url})`;
@@ -95,4 +100,39 @@ function upsertPinnedGuide(filePath, gameId, badge, url) {
   return { game, badge, url, replaced: existing >= 0 };
 }
 
-module.exports = { addApprovedGame, loadCatalog, parseCatalog, publicGames, upsertPinnedGuide };
+function removePinnedGuide(filePath, gameId, badgeValue) {
+  const badge = validateGuideName(badgeValue);
+  const markdown = fs.readFileSync(filePath, 'utf8');
+  const game = parseCatalog(markdown).find(item => item.id === gameId);
+  if (!game) throw new Error('Please choose an approved game.');
+  const pin = game.pinned[normalizeKey(badge)];
+  if (!pin) throw new Error('That approved video no longer exists.');
+
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const { start, end } = gameSection(lines, game);
+  const pinIndex = lines.findIndex((line, index) => {
+    if (index <= start || index >= end) return false;
+    const match = line.match(/^\s*-\s*\[([^\]]+)]\(/);
+    return match && normalizeKey(match[1]) === normalizeKey(badge);
+  });
+  if (pinIndex < 0) throw new Error('The approved video entry could not be found.');
+  lines.splice(pinIndex, 1);
+  writeCatalog(filePath, lines.join('\n'));
+  return { game, pin };
+}
+
+function removeApprovedGame(filePath, gameId) {
+  const markdown = fs.readFileSync(filePath, 'utf8');
+  const game = parseCatalog(markdown).find(item => item.id === gameId);
+  if (!game) throw new Error('That approved game no longer exists.');
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const { start, end } = gameSection(lines, game);
+  lines.splice(start, end - start);
+  writeCatalog(filePath, lines.join('\n'));
+  return game;
+}
+
+module.exports = {
+  addApprovedGame, loadCatalog, parseCatalog, publicGames,
+  removeApprovedGame, removePinnedGuide, upsertPinnedGuide
+};

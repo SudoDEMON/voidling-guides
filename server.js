@@ -273,6 +273,7 @@ function createRequest(game, badge, client) {
 const adminController = createAdminController({
   authPath: path.join(DATA_ROOT, 'admin-auth.json'),
   catalogPath: CATALOG_PATH,
+  videosRoot: path.join(DATA_ROOT, 'videos'),
   store,
   audit,
   sendJson,

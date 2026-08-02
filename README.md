@@ -66,6 +66,13 @@ It validates video URLs, metadata, captions, and public availability before
 updating the local catalog. After it succeeds, the child requests the exact
 guide name from the normal page.
 
+Dad can also remove manually approved video links, game requests, guide/library
+entries, and approved games. Every removal asks for confirmation and is written
+to the append-only audit log. Removing a completed library entry permanently
+deletes its managed WebM file; removing only an approved video link leaves any
+already downloaded library copy alone. A game cannot be removed until its
+related library entries have been removed, which prevents orphaned videos.
+
 If a game is missing from the kids' dropdown, the child can submit its platform
 and full game name for Dad to review. This does not search YouTube or download
 anything. Dad can approve or decline it from `/dad`; approval adds the game to

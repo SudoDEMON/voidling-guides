@@ -45,7 +45,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'voidling-server-test-'));
   const dataRoot = path.join(scratch, 'data');
   const catalogPath = path.join(scratch, 'approved-guides.md');
-  const catalogText = '# Approved\n\n## Roblox: Become Tiky and Everything Else Again\n';
+  const catalogText = '# Approved\n\n## Roblox: Become Tiky and Everything Else Again\n\n- [Verity](https://youtu.be/SaPy5eZrv34)\n';
   fs.writeFileSync(catalogPath, catalogText);
   const approvedGame = parseCatalog(catalogText)[0];
   const confirmationId = '11111111-1111-4111-8111-111111111111';
@@ -142,7 +142,13 @@ test('LAN server exposes only narrow static and API routes', async t => {
 
   const dadPage = await fetch(`${dadOrigin}/dad`);
   assert.equal(dadPage.status, 200);
-  assert.match(await dadPage.text(), /Dad Approval/);
+  const dadPageBody = await dadPage.text();
+  assert.match(dadPageBody, /Dad Approval/);
+  assert.match(dadPageBody, /id="approvedGameList"/);
+  assert.match(dadPageBody, /permanently deletes its downloaded WebM file/);
+  const dadScript = await fetch(`${dadOrigin}/dad/app.js`).then(response => response.text());
+  assert.match(dadScript, /method: 'DELETE'/);
+  assert.match(dadScript, /Remove entry & video/);
   const dadState = await fetch(`${dadOrigin}/dad/api/state`).then(response => response.json());
   assert.deepEqual(dadState, { configured: true, authenticated: false });
 
@@ -166,6 +172,12 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.equal(unlocked.requests.find(request => request.id === confirmationId).suggestedBadge, 'Sans Skeleton');
   assert.equal(unlocked.gameRequests.some(request => request.name === 'Kid Requested Game'), true);
   assert.equal(Array.isArray(unlocked.log), true);
+
+  const unauthenticatedDelete = await fetch(`${origin}/dad/api/pins`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin },
+    body: JSON.stringify({ gameId: approvedGame.id, guide: 'Verity' })
+  });
+  assert.equal(unauthenticatedDelete.status, 401);
 
   const pendingKidRequest = unlocked.gameRequests.find(request => request.name === 'Kid Requested Game');
   const approveGameRequest = await fetch(`${origin}/dad/api/game-requests/${pendingKidRequest.id}`, {
@@ -194,6 +206,26 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.equal(addedState.games.some(game => game.name === 'A Newly Approved Game'), true);
   assert.match(fs.readFileSync(catalogPath, 'utf8'), /## Roblox: A Newly Approved Game/);
 
+  const blockedGameRemoval = await fetch(`${origin}/dad/api/games/${encodeURIComponent(approvedGame.id)}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  assert.equal(blockedGameRemoval.status, 409);
+
+  const removeAddedGame = await fetch(`${origin}/dad/api/games/${encodeURIComponent(addedState.game.id)}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  const removedGameState = await removeAddedGame.json();
+  assert.equal(removeAddedGame.status, 200);
+  assert.equal(removedGameState.games.some(game => game.name === 'A Newly Approved Game'), false);
+
+  const removePin = await fetch(`${origin}/dad/api/pins`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie },
+    body: JSON.stringify({ gameId: approvedGame.id, guide: 'Verity' })
+  });
+  const removedPinState = await removePin.json();
+  assert.equal(removePin.status, 200);
+  assert.equal(removedPinState.games[0].pins.length, 0);
+
   const editRequest = await fetch(`${origin}/dad/api/requests/${completeId}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
     body: JSON.stringify({ gameId: approvedGame.id, guide: 'Sans Skeleton' })
@@ -201,6 +233,19 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const editedState = await editRequest.json();
   assert.equal(editRequest.status, 200, JSON.stringify(editedState));
   assert.equal(editedState.requests.find(request => request.id === completeId).badge, 'Sans Skeleton');
+
+  const removeGuide = await fetch(`${origin}/dad/api/requests/${completeId}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  const removedGuideState = await removeGuide.json();
+  assert.equal(removeGuide.status, 200);
+  assert.equal(removedGuideState.requests.some(request => request.id === completeId), false);
+  assert.equal(fs.existsSync(completeFile), false);
+
+  const removeApprovedGameRequest = await fetch(`${origin}/dad/api/game-requests/${pendingKidRequest.id}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  assert.equal(removeApprovedGameRequest.status, 200);
 
   const invalidPin = await fetch(`${origin}/dad/api/pins`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin, cookie },
@@ -225,5 +270,22 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.equal(declinedResponse.status, 200);
   assert.equal(declined.guide.status, 'failed');
   assert.equal(declined.guide.suggestedBadge, null);
-  assert.match(fs.readFileSync(path.join(dataRoot, 'request-log.md'), 'utf8'), /DECLINED.*Sans Skeleton/);
+
+  const removeFailedGuide = await fetch(`${origin}/dad/api/requests/${confirmationId}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  assert.equal(removeFailedGuide.status, 200);
+
+  const removeOriginalGame = await fetch(`${origin}/dad/api/games/${encodeURIComponent(approvedGame.id)}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  const finalState = await removeOriginalGame.json();
+  assert.equal(removeOriginalGame.status, 200);
+  assert.equal(finalState.games.some(game => game.id === approvedGame.id), false);
+
+  const requestLog = fs.readFileSync(path.join(dataRoot, 'request-log.md'), 'utf8');
+  assert.match(requestLog, /DECLINED.*Sans Skeleton/);
+  assert.match(requestLog, /DAD_PIN_REMOVED/);
+  assert.match(requestLog, /DAD_REQUEST_REMOVED/);
+  assert.match(requestLog, /DAD_GAME_REMOVED/);
 });

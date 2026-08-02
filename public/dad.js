@@ -29,6 +29,7 @@ const cancelEditButton = document.querySelector('#cancelEditButton');
 const editMessage = document.querySelector('#editMessage');
 const requestList = document.querySelector('#requestList');
 const gameRequestList = document.querySelector('#gameRequestList');
+const approvedGameList = document.querySelector('#approvedGameList');
 const pinList = document.querySelector('#pinList');
 const auditLog = document.querySelector('#auditLog');
 let editingRequestId = '';
@@ -43,6 +44,22 @@ function text(tag, className, value) {
 function message(node, value, type = '') {
   node.textContent = value;
   node.className = `message ${type}`.trim();
+}
+
+async function removeThing({ button, prompt, url, body = {}, messageNode }) {
+  if (!window.confirm(prompt)) return;
+  button.disabled = true;
+  try {
+    const state = await jsonFetch(url, {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    });
+    message(messageNode, state.message, 'success');
+    renderState(state);
+  } catch (error) {
+    if (error.status === 401) await loadState();
+    message(messageNode, error.message, 'error');
+    button.disabled = false;
+  }
 }
 
 async function jsonFetch(url, options = {}) {
@@ -69,6 +86,27 @@ function renderGames(games) {
     if ([...select.options].some(option => option.value === selected)) select.value = selected;
   }
 
+  const hasGames = games.length > 0;
+  approveButton.disabled = !hasGames;
+  approvedGameList.replaceChildren();
+  if (!hasGames) approvedGameList.append(text('p', 'empty', 'No approved games yet.'));
+  for (const game of games) {
+    const item = document.createElement('article');
+    item.className = 'game-item';
+    item.append(text('h3', '', game.name));
+    item.append(text('p', 'meta', `${game.platform} · ${game.pins.length} approved ${game.pins.length === 1 ? 'video' : 'videos'}`));
+    const remove = text('button', 'use-button destructive-button', 'Remove game');
+    remove.type = 'button';
+    remove.addEventListener('click', () => removeThing({
+      button: remove,
+      prompt: `Remove ${game.name} and all of its manually approved video links? Related library entries must be removed first.`,
+      url: `/dad/api/games/${encodeURIComponent(game.id)}`,
+      messageNode: gameMessage
+    }));
+    item.append(remove);
+    approvedGameList.append(item);
+  }
+
   pinList.replaceChildren();
   const pins = games.flatMap(game => game.pins.map(pin => ({ ...pin, game })));
   if (pins.length === 0) pinList.append(text('p', 'empty', 'No manually approved videos yet.'));
@@ -91,7 +129,19 @@ function renderGames(games) {
       guideInput.focus();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
-    item.append(edit);
+    const remove = text('button', 'use-button destructive-button', 'Remove approved video');
+    remove.type = 'button';
+    remove.addEventListener('click', () => removeThing({
+      button: remove,
+      prompt: `Remove the manually approved video for ${pin.badge}? Existing downloaded library copies are not removed.`,
+      url: '/dad/api/pins',
+      body: { gameId: pin.game.id, guide: pin.badge },
+      messageNode: approvalMessage
+    }));
+    const actions = document.createElement('div');
+    actions.className = 'request-actions';
+    actions.append(edit, remove);
+    item.append(actions);
     pinList.append(item);
   }
 }
@@ -136,7 +186,19 @@ function renderRequests(requests) {
       editPanel.hidden = false;
       editPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-    actions.append(use, edit);
+    const remove = text('button', 'use-button destructive-button', request.status === 'complete' ? 'Remove entry & video' : 'Remove entry');
+    remove.type = 'button';
+    remove.disabled = busy;
+    if (busy) remove.title = 'Wait for the current guide work to finish.';
+    remove.addEventListener('click', () => removeThing({
+      button: remove,
+      prompt: request.status === 'complete'
+        ? `Remove ${request.badge} from the library and permanently delete its downloaded video file?`
+        : `Remove the ${request.badge} request from the library?`,
+      url: `/dad/api/requests/${encodeURIComponent(request.id)}`,
+      messageNode: approvalMessage
+    }));
+    actions.append(use, edit, remove);
     item.append(actions);
     requestList.append(item);
   }
@@ -154,9 +216,9 @@ function renderGameRequests(requests) {
     top.append(text('span', 'status', request.status));
     item.append(top);
     item.append(text('p', 'meta', `${request.platform} · ${new Date(request.createdAt).toLocaleString()} · ${request.requestClient || 'unknown client'}`));
+    const actions = document.createElement('div');
+    actions.className = 'request-actions';
     if (request.status === 'pending') {
-      const actions = document.createElement('div');
-      actions.className = 'request-actions';
       const approve = text('button', 'use-button', 'Approve game');
       const decline = text('button', 'use-button decline-request', 'Decline');
       approve.type = 'button';
@@ -183,8 +245,17 @@ function renderGameRequests(requests) {
       approve.addEventListener('click', () => decide('approve'));
       decline.addEventListener('click', () => decide('decline'));
       actions.append(approve, decline);
-      item.append(actions);
     }
+    const remove = text('button', 'use-button destructive-button', 'Remove request');
+    remove.type = 'button';
+    remove.addEventListener('click', () => removeThing({
+      button: remove,
+      prompt: `Remove the ${request.name} game request from Dad’s review history?`,
+      url: `/dad/api/game-requests/${encodeURIComponent(request.id)}`,
+      messageNode: gameMessage
+    }));
+    actions.append(remove);
+    item.append(actions);
     gameRequestList.append(item);
   }
 }

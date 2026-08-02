@@ -7,7 +7,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { dadPostAllowed, verifyPassword, writePassword } = require('../src/admin-auth');
 const { RequestAudit } = require('../src/audit');
-const { addApprovedGame, parseCatalog, upsertPinnedGuide } = require('../src/catalog');
+const {
+  addApprovedGame, parseCatalog, removeApprovedGame, removePinnedGuide, upsertPinnedGuide
+} = require('../src/catalog');
 const { convertGuide } = require('../src/converter');
 const { needsClarification, parseSelection, plausibleCandidates, validateMetadata, youtubeSearch } = require('../src/discovery');
 const { addressAllowed, cidrContains } = require('../src/network');
@@ -59,6 +61,14 @@ test('catalog safely adds and replaces a manual Dad pin', t => {
   const parsed = parseCatalog(fs.readFileSync(catalogPath, 'utf8'))[0];
   assert.equal(parsed.pinned['sans skeleton'].url, 'https://www.youtube.com/watch?v=-Uvo203Bd2I');
   assert.equal(parsed.pinned.old.url, 'https://www.youtube.com/watch?v=SaPy5eZrv34');
+
+  const removedPin = removePinnedGuide(catalogPath, game.id, 'Old');
+  assert.equal(removedPin.pin.badge, 'Old');
+  assert.equal(parseCatalog(fs.readFileSync(catalogPath, 'utf8'))[0].pinned.old, undefined);
+
+  const removedGame = removeApprovedGame(catalogPath, game.id);
+  assert.equal(removedGame.name, 'Test Game');
+  assert.equal(parseCatalog(fs.readFileSync(catalogPath, 'utf8')).length, 0);
 });
 
 test('Dad can add a validated approved game', t => {

@@ -1,8 +1,11 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const { AdminSessions, dadPostAllowed, verifyPassword } = require('./admin-auth');
-const { addApprovedGame, loadCatalog, upsertPinnedGuide } = require('./catalog');
+const {
+  addApprovedGame, loadCatalog, removeApprovedGame, removePinnedGuide, upsertPinnedGuide
+} = require('./catalog');
 const { validatePinnedGuide } = require('./discovery');
 const { normalizeAddress } = require('./network');
 const { normalizeKey, stableId, validateGuideName } = require('./safety');
@@ -10,6 +13,7 @@ const { normalizeKey, stableId, validateGuideName } = require('./safety');
 function createAdminController(options) {
   const sessions = new AdminSessions();
   let loginFailures = [];
+  const busyStatuses = new Set(['queued', 'searching', 'checking', 'downloading']);
 
   function state() {
     const games = loadCatalog(options.catalogPath).map(game => ({
@@ -47,6 +51,20 @@ function createAdminController(options) {
       return true;
     }
     return false;
+  }
+
+  function removeGuideFile(guide) {
+    if (!guide.filePath || !fs.existsSync(guide.filePath)) return false;
+    const videosRoot = path.resolve(options.videosRoot);
+    const target = path.resolve(guide.filePath);
+    if (!target.startsWith(`${videosRoot}${path.sep}`)) {
+      throw new Error('Refusing to remove a guide file outside the managed videos directory.');
+    }
+    fs.rmSync(target, { force: true });
+    try { fs.rmdirSync(path.dirname(target)); } catch (error) {
+      if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error;
+    }
+    return true;
   }
 
   async function updateRequest(req, res, id) {
@@ -147,7 +165,37 @@ function createAdminController(options) {
       options.sendJson(res, 201, { message: `Added ${game.name}.`, game, ...state() });
       return true;
     }
+    const gameMatch = pathname.match(/^\/dad\/api\/games\/([a-z0-9-]{3,160})$/i);
+    if (req.method === 'DELETE' && gameMatch) {
+      if (rejectMutation(req, res, 'Game removal')) return true;
+      const game = loadCatalog(options.catalogPath).find(item => item.id === gameMatch[1]);
+      if (!game) return options.sendJson(res, 404, { error: 'That approved game no longer exists.' });
+      const related = options.store.state.guides.filter(guide => guide.gameId === game.id);
+      if (related.length > 0) {
+        return options.sendJson(res, 409, {
+          error: `Remove the ${related.length} related guide ${related.length === 1 ? 'entry' : 'entries'} first.`
+        });
+      }
+      removeApprovedGame(options.catalogPath, game.id);
+      options.audit.append('DAD_GAME_REMOVED', {
+        game: game.name, client: normalizeAddress(req.socket.remoteAddress),
+        reason: `Removed ${game.platform} game and ${Object.keys(game.pinned).length} approved video(s)`
+      });
+      options.sendJson(res, 200, { message: `Removed ${game.name}.`, ...state() });
+      return true;
+    }
     const gameRequestMatch = pathname.match(/^\/dad\/api\/game-requests\/([0-9a-f-]{36})$/i);
+    if (req.method === 'DELETE' && gameRequestMatch) {
+      if (rejectMutation(req, res, 'Game request removal')) return true;
+      const request = options.store.removeGameRequest(gameRequestMatch[1]);
+      if (!request) return options.sendJson(res, 404, { error: 'That game request no longer exists.' });
+      options.audit.append('DAD_GAME_REQUEST_REMOVED', {
+        game: request.name, client: normalizeAddress(req.socket.remoteAddress),
+        reason: `Removed ${request.status} ${request.platform} game request`
+      });
+      options.sendJson(res, 200, { message: `Removed the ${request.name} game request.`, ...state() });
+      return true;
+    }
     if (req.method === 'POST' && gameRequestMatch) {
       if (rejectMutation(req, res, 'Game request review')) return true;
       const request = options.store.state.gameRequests.find(item => item.id === gameRequestMatch[1]);
@@ -202,7 +250,43 @@ function createAdminController(options) {
       });
       return true;
     }
+    if (req.method === 'DELETE' && pathname === '/dad/api/pins') {
+      if (rejectMutation(req, res, 'Approved video removal')) return true;
+      const body = await options.readJson(req);
+      const game = loadCatalog(options.catalogPath).find(item => item.id === String(body.gameId || ''));
+      if (!game) return options.sendJson(res, 404, { error: 'That approved game no longer exists.' });
+      const badge = validateGuideName(body.guide ?? body.badge);
+      const busy = options.store.state.guides.find(guide => guide.gameId === game.id
+        && normalizeKey(guide.badge) === normalizeKey(badge) && busyStatuses.has(guide.status));
+      if (busy) return options.sendJson(res, 409, { error: 'Wait for this guide to finish before removing its approved video.' });
+      const result = removePinnedGuide(options.catalogPath, game.id, badge);
+      options.audit.append('DAD_PIN_REMOVED', {
+        game: game.name, badge: result.pin.badge, client: normalizeAddress(req.socket.remoteAddress),
+        url: result.pin.url, reason: 'Removed manually approved video'
+      });
+      options.sendJson(res, 200, {
+        message: `Removed the approved video for ${result.pin.badge}.`, ...state()
+      });
+      return true;
+    }
     const requestMatch = pathname.match(/^\/dad\/api\/requests\/([0-9a-f-]{36})$/i);
+    if (req.method === 'DELETE' && requestMatch) {
+      if (rejectMutation(req, res, 'Guide removal')) return true;
+      const guide = options.store.state.guides.find(item => item.id === requestMatch[1]);
+      if (!guide) return options.sendJson(res, 404, { error: 'That guide entry no longer exists.' });
+      if (busyStatuses.has(guide.status)) {
+        return options.sendJson(res, 409, { error: 'Wait for the current guide work to finish before removing it.' });
+      }
+      const removedVideo = removeGuideFile(guide);
+      options.store.remove(guide.id);
+      options.audit.append('DAD_REQUEST_REMOVED', {
+        game: guide.game, badge: guide.badge, client: normalizeAddress(req.socket.remoteAddress),
+        video: guide.sourceTitle || guide.status,
+        reason: removedVideo ? 'Removed library entry and managed video file' : 'Removed library entry'
+      });
+      options.sendJson(res, 200, { message: `Removed ${guide.badge} from the library.`, ...state() });
+      return true;
+    }
     if (req.method === 'POST' && requestMatch) {
       await updateRequest(req, res, requestMatch[1]);
       return true;

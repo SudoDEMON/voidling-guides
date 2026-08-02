@@ -67,9 +67,10 @@ class LibraryStore {
   }
 
   remove(id) {
-    const before = this.state.guides.length;
+    const removed = this.state.guides.find(guide => guide.id === id) || null;
     this.state.guides = this.state.guides.filter(guide => guide.id !== id);
-    if (this.state.guides.length !== before) this.save();
+    if (removed) this.save();
+    return removed;
   }
 
   findDuplicate(key) {
@@ -88,6 +89,13 @@ class LibraryStore {
     Object.assign(request, changes);
     this.save();
     return request;
+  }
+
+  removeGameRequest(id) {
+    const removed = this.state.gameRequests.find(request => request.id === id) || null;
+    this.state.gameRequests = this.state.gameRequests.filter(request => request.id !== id);
+    if (removed) this.save();
+    return removed;
   }
 
   findPendingGameRequest(key) {
