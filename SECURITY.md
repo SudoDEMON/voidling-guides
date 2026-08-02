@@ -6,3 +6,11 @@ credential, private video URL, local request log, or network configuration.
 
 Local files under `data/` are intentionally excluded from version control. Never
 attach that directory to an issue or commit it to a branch.
+
+The Dad portal is available only to clients accepted by the server's LAN
+allowlist and still requires its separately configured password. The built-in
+server uses plain HTTP, so the password and session are not encrypted in
+transit. Keep the service on a trusted LAN with a matching host firewall rule;
+use an HTTPS reverse proxy or trusted VPN before exposing it to any untrusted
+network. Avoid the `*` client rule unless the surrounding network boundary is
+equally restrictive.

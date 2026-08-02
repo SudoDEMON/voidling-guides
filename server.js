@@ -7,7 +7,6 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { isLoopbackAddress } = require('./src/admin-auth');
 const { createAdminController } = require('./src/admin-controller');
 const { RequestAudit } = require('./src/audit');
 const { loadCatalog, publicGames } = require('./src/catalog');
@@ -336,7 +335,6 @@ async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
   const pathname = url.pathname;
   const dadRoute = pathname === '/dad' || pathname.startsWith('/dad/');
-  if (dadRoute && !isLoopbackAddress(req.socket.remoteAddress)) return sendText(res, 404, 'Not found');
   if (!clientAllowed(req)) return sendText(res, 403, 'This device is not allowed to use Voidling Guides.');
   if (dadRoute && await adminController.handle(req, res, pathname)) return;
   if (req.method === 'GET' && pathname === '/favicon.ico') {
@@ -471,4 +469,4 @@ server.listen(PORT, HOST, () => {
 const cleanupTimer = setInterval(() => store.cleanup(), 60 * 60 * 1000);
 if (typeof cleanupTimer.unref === 'function') cleanupTimer.unref();
 
-module.exports = { ALLOWED_CLIENTS, HOST, PORT, SAFE_FAILURE, clientAllowed, isLoopbackAddress, server };
+module.exports = { ALLOWED_CLIENTS, HOST, PORT, SAFE_FAILURE, clientAllowed, server };

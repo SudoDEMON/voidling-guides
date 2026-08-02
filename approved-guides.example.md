@@ -1,7 +1,7 @@
 # Approved Games and Guides
 
 The application copies this file to the ignored local catalog on first start.
-Add games and pinned videos through the localhost-only Dad page, or edit
+Add games and pinned videos through the password-protected Dad page, or edit
 `data/approved-guides.md` directly.
 
 Each level-two heading uses this format:

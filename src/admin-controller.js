@@ -39,7 +39,7 @@ function createAdminController(options) {
 
   function rejectMutation(req, res, action) {
     if (!dadPostAllowed(req)) {
-      options.sendJson(res, 403, { error: `${action} must come from the local Dad page.` });
+      options.sendJson(res, 403, { error: `${action} must come from the Dad portal.` });
       return true;
     }
     if (!sessions.authenticated(req)) {
@@ -102,7 +102,7 @@ function createAdminController(options) {
     }
     if (req.method === 'POST' && pathname === '/dad/api/login') {
       if (!dadPostAllowed(req)) {
-        options.sendJson(res, 403, { error: 'Login must come from the local Dad page.' });
+        options.sendJson(res, 403, { error: 'Login must come from the Dad portal.' });
         return true;
       }
       if (!fs.existsSync(options.authPath)) {
@@ -124,13 +124,13 @@ function createAdminController(options) {
       }
       loginFailures = [];
       const token = sessions.create();
-      options.audit.append('DAD_LOGIN', { client: normalizeAddress(req.socket.remoteAddress), reason: 'Local Dad page login' });
+      options.audit.append('DAD_LOGIN', { client: normalizeAddress(req.socket.remoteAddress), reason: 'Password-protected Dad portal login' });
       options.sendJson(res, 200, { authenticated: true }, { 'set-cookie': sessions.cookie(token) });
       return true;
     }
     if (req.method === 'POST' && pathname === '/dad/api/logout') {
       if (!dadPostAllowed(req)) {
-        options.sendJson(res, 403, { error: 'Logout must come from the local Dad page.' });
+        options.sendJson(res, 403, { error: 'Logout must come from the Dad portal.' });
         return true;
       }
       sessions.destroy(req);
@@ -194,7 +194,7 @@ function createAdminController(options) {
       const result = upsertPinnedGuide(options.catalogPath, game.id, badge, selected.webpageUrl);
       options.audit.append(result.replaced ? 'DAD_PIN_REPLACED' : 'DAD_PIN_ADDED', {
         game: game.name, badge, client: normalizeAddress(req.socket.remoteAddress),
-        video: selected.title, url: selected.webpageUrl, reason: 'Local password-protected Dad page'
+        video: selected.title, url: selected.webpageUrl, reason: 'Password-protected Dad portal'
       });
       options.sendJson(res, result.replaced ? 200 : 201, {
         message: result.replaced ? `Updated the approved video for ${badge}.` : `Approved ${badge}.`,

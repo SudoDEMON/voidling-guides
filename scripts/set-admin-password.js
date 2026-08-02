@@ -47,7 +47,7 @@ function secretPrompt(label) {
   const target = path.join(__dirname, '..', 'data', 'admin-auth.json');
   writePassword(target, first);
   console.log(`Dad password saved securely in ${target}`);
-  console.log('Open http://127.0.0.1:3002/dad on this computer.');
+  console.log('Open /dad at the Voidling Guides address from an allowed LAN device.');
 })().catch(error => {
   console.error(error.message);
   process.exitCode = 1;

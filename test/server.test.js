@@ -32,6 +32,14 @@ async function waitFor(url) {
   throw new Error(`Server did not start: ${url}`);
 }
 
+function lanIpv4Address() {
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    const address = (addresses || []).find(item => item.family === 'IPv4' && !item.internal);
+    if (address) return address.address;
+  }
+  throw new Error('The LAN Dad portal integration test requires a non-loopback IPv4 address.');
+}
+
 test('LAN server exposes only narrow static and API routes', async t => {
   const root = path.resolve(__dirname, '..');
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'voidling-server-test-'));
@@ -43,6 +51,8 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const confirmationId = '11111111-1111-4111-8111-111111111111';
   const completeId = '22222222-2222-4222-8222-222222222222';
   const declineGameRequestId = '33333333-3333-4333-8333-333333333333';
+  const recentCompletedAt = new Date().toISOString();
+  const recentCreatedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const completeFile = path.join(dataRoot, 'videos', 'sans.webm');
   fs.mkdirSync(dataRoot, { recursive: true });
   fs.mkdirSync(path.dirname(completeFile), { recursive: true });
@@ -70,19 +80,21 @@ test('LAN server exposes only narrow static and API routes', async t => {
       id: completeId, key: `${approvedGame.id}:sans`, gameId: approvedGame.id,
       game: approvedGame.name, platform: approvedGame.platform, badge: 'Sans',
       status: 'complete', message: 'Ready to watch!', sourceTitle: 'Existing Sans guide',
-      channel: 'Guide Maker', createdAt: '2026-07-22T01:00:00.000Z',
-      completedAt: '2026-07-22T01:10:00.000Z', filePath: completeFile, requestClient: '127.0.0.1'
+      channel: 'Guide Maker', createdAt: recentCreatedAt,
+      completedAt: recentCompletedAt, filePath: completeFile, requestClient: '127.0.0.1'
     }]
   }, null, 2)}\n`);
   writePassword(path.join(dataRoot, 'admin-auth.json'), 'correct horse battery staple');
   const port = await freePort();
+  const lanAddress = lanIpv4Address();
+  const dadOrigin = `http://${lanAddress}:${port}`;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: root,
     env: {
       ...process.env,
-      VOIDLING_HOST: '127.0.0.1',
+      VOIDLING_HOST: '0.0.0.0',
       VOIDLING_PORT: String(port),
-      VOIDLING_ALLOWED_CLIENTS: '127.0.0.1',
+      VOIDLING_ALLOWED_CLIENTS: `127.0.0.1,${lanAddress}`,
       VOIDLING_DATA_ROOT: dataRoot,
       VOIDLING_CATALOG_PATH: catalogPath
     },
@@ -128,19 +140,19 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.match(browserScript, /fetch\('\/api\/games'/);
   assert.match(browserScript, /guide: guideInput\.value/);
 
-  const dadPage = await fetch(`http://127.0.0.1:${port}/dad`);
+  const dadPage = await fetch(`${dadOrigin}/dad`);
   assert.equal(dadPage.status, 200);
   assert.match(await dadPage.text(), /Dad Approval/);
-  const dadState = await fetch(`http://127.0.0.1:${port}/dad/api/state`).then(response => response.json());
+  const dadState = await fetch(`${dadOrigin}/dad/api/state`).then(response => response.json());
   assert.deepEqual(dadState, { configured: true, authenticated: false });
 
-  const badOrigin = await fetch(`http://127.0.0.1:${port}/dad/api/login`, {
+  const badOrigin = await fetch(`${dadOrigin}/dad/api/login`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://example.com' },
     body: JSON.stringify({ password: 'correct horse battery staple' })
   });
   assert.equal(badOrigin.status, 403);
 
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = dadOrigin;
   const login = await fetch(`${origin}/dad/api/login`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({ password: 'correct horse battery staple' })
@@ -187,7 +199,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
     body: JSON.stringify({ gameId: approvedGame.id, guide: 'Sans Skeleton' })
   });
   const editedState = await editRequest.json();
-  assert.equal(editRequest.status, 200);
+  assert.equal(editRequest.status, 200, JSON.stringify(editedState));
   assert.equal(editedState.requests.find(request => request.id === completeId).badge, 'Sans Skeleton');
 
   const invalidPin = await fetch(`${origin}/dad/api/pins`, {

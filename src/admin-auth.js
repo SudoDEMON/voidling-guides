@@ -8,16 +8,11 @@ const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const ADMIN_COOKIE = 'voidling_dad';
 const ADMIN_SESSION_MS = 8 * 60 * 60 * 1000;
 
-function isLoopbackAddress(value) {
-  const address = String(value || '').replace(/^::ffff:/, '');
-  return address.startsWith('127.') || address === '::1';
-}
-
 function dadPostAllowed(req) {
   if (!String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')) return false;
   try {
     const origin = new URL(String(req.headers.origin || ''));
-    return origin.protocol === 'http:' && origin.host === req.headers.host;
+    return ['http:', 'https:'].includes(origin.protocol) && origin.host === req.headers.host;
   } catch {
     return false;
   }
@@ -100,6 +95,6 @@ function verifyPassword(filePath, password) {
 }
 
 module.exports = {
-  AdminSessions, dadPostAllowed, isLoopbackAddress,
+  AdminSessions, dadPostAllowed,
   passwordRecord, readRecord, validatePassword, verifyPassword, writePassword
 };

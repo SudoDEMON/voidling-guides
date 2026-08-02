@@ -53,10 +53,11 @@ password while you type and stores only a salted scrypt hash in the ignored
 npm run set-password
 ```
 
-Then, on this computer only, open:
+Then open `/dad` using the same Voidling Guides address from any device allowed
+by the LAN client list, for example:
 
 ```text
-http://127.0.0.1:3002/dad
+http://192.168.1.50:3002/dad
 ```
 
 The page lets Dad add approved games, review and correct kid requests, inspect
@@ -70,12 +71,18 @@ and full game name for Dad to review. This does not search YouTube or download
 anything. Dad can approve or decline it from `/dad`; approval adds the game to
 the dropdown, which refreshes automatically.
 
-The entire `/dad` route tree is enforced as loopback-only by the server. A
-request to `/dad` through any LAN address, including one made from the server
-itself, is returned as Not Found. Login uses an eight-hour in-memory session with an
-HTTP-only, SameSite-Strict cookie; restarting the server locks the page again.
-Run `npm run set-password` again at any time to replace the stored password. No
-default password exists.
+The entire `/dad` route tree uses the same configured client allowlist as the
+kids' page, so devices outside the approved LAN are rejected before the login
+page is served. Every approved LAN device can see the login form, but reading
+Dad data or performing Dad actions requires the password. Login uses an
+eight-hour in-memory session with an HTTP-only, SameSite-Strict cookie;
+restarting the server locks the page again. Run `npm run set-password` again at
+any time to replace the stored password. No default password exists.
+
+The built-in server uses plain HTTP. Use the Dad portal only on a trusted LAN,
+because its password and session traffic are not encrypted in transit. For an
+untrusted network, add HTTPS through a reverse proxy or connect through a
+trusted VPN instead of widening the allowlist.
 
 ## LAN access
 
@@ -86,11 +93,11 @@ Configure the local LAN subnet once; this writes an ignored `data/settings.json`
 npm run configure-lan -- 192.168.1.0/24
 ```
 
-CIDR support lets every device in the selected subnet use the kid-facing page.
-The Dad page remains loopback-only. For a temporary override, set a comma-separated
-`VOIDLING_ALLOWED_CLIENTS`; use `*` only when every device that can reach the
-port should have access. The host and port can be changed with `VOIDLING_HOST`
-and `VOIDLING_PORT`.
+CIDR support lets every device in the selected subnet use both the kid-facing
+page and the password-protected Dad login. For a temporary override, set a
+comma-separated `VOIDLING_ALLOWED_CLIENTS`; use `*` only when every device that
+can reach the port should have access. The host and port can be changed with
+`VOIDLING_HOST` and `VOIDLING_PORT`.
 
 On systems using UFW with a default-drop input policy, allow that same subnet:
 
@@ -215,4 +222,4 @@ directory.
 The service intentionally has no runtime npm dependencies. Its HTTP surface is
 limited to static site assets, three kid-facing read APIs, the request and
 confirmation APIs, registered completed-video playback with HTTP byte ranges,
-and the separately authenticated localhost-only Dad routes.
+and the separately authenticated Dad routes available to approved LAN clients.

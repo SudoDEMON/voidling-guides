@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isLoopbackAddress, verifyPassword, writePassword } = require('../src/admin-auth');
+const { dadPostAllowed, verifyPassword, writePassword } = require('../src/admin-auth');
 const { RequestAudit } = require('../src/audit');
 const { addApprovedGame, parseCatalog, upsertPinnedGuide } = require('../src/catalog');
 const { convertGuide } = require('../src/converter');
@@ -82,12 +82,18 @@ test('Dad password is salted, hashed, private, and verifiable', t => {
   assert.equal(verifyPassword(authPath, 'wrong password'), false);
 });
 
-test('Dad routes recognize only loopback clients', () => {
-  assert.equal(isLoopbackAddress('127.0.0.1'), true);
-  assert.equal(isLoopbackAddress('::ffff:127.0.0.1'), true);
-  assert.equal(isLoopbackAddress('::1'), true);
-  assert.equal(isLoopbackAddress('192.0.2.14'), false);
-  assert.equal(isLoopbackAddress('192.0.2.91'), false);
+test('Dad mutations require exact same-origin JSON requests from LAN hosts', () => {
+  const request = { headers: {
+    'content-type': 'application/json; charset=utf-8',
+    host: '192.0.2.14:3002',
+    origin: 'http://192.0.2.14:3002'
+  } };
+  assert.equal(dadPostAllowed(request), true);
+  assert.equal(dadPostAllowed({ headers: {
+    ...request.headers, host: 'guides.example.test', origin: 'https://guides.example.test'
+  } }), true);
+  assert.equal(dadPostAllowed({ headers: { ...request.headers, origin: 'http://192.0.2.91:3002' } }), false);
+  assert.equal(dadPostAllowed({ headers: { ...request.headers, 'content-type': 'text/plain' } }), false);
 });
 
 test('LAN allowlist supports the local /24 without widening beyond it', () => {
