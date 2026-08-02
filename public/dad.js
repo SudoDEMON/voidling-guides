@@ -54,7 +54,7 @@ async function removeThing({ button, prompt, url, body = {}, messageNode }) {
       method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
     });
     message(messageNode, state.message, 'success');
-    renderState(state);
+    renderDashboard(state);
   } catch (error) {
     if (error.status === 401) await loadState();
     message(messageNode, error.message, 'error');
@@ -266,6 +266,13 @@ function renderLog(entries) {
   for (const entry of entries) auditLog.append(text('div', 'audit-entry', entry));
 }
 
+function renderDashboard(state) {
+  renderGames(state.games || []);
+  renderRequests(state.requests || []);
+  renderGameRequests(state.gameRequests || []);
+  renderLog(state.log || []);
+}
+
 function renderState(state) {
   if (!state.authenticated) {
     dashboard.hidden = true;
@@ -278,10 +285,7 @@ function renderState(state) {
   }
   loginPanel.hidden = true;
   dashboard.hidden = false;
-  renderGames(state.games || []);
-  renderRequests(state.requests || []);
-  renderGameRequests(state.gameRequests || []);
-  renderLog(state.log || []);
+  renderDashboard(state);
 }
 
 async function loadState() {

@@ -149,6 +149,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const dadScript = await fetch(`${dadOrigin}/dad/app.js`).then(response => response.text());
   assert.match(dadScript, /method: 'DELETE'/);
   assert.match(dadScript, /Remove entry & video/);
+  assert.match(dadScript, /message\(messageNode, state\.message, 'success'\);\s+renderDashboard\(state\)/);
   const dadState = await fetch(`${dadOrigin}/dad/api/state`).then(response => response.json());
   assert.deepEqual(dadState, { configured: true, authenticated: false });
 
