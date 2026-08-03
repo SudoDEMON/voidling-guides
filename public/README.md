@@ -11,7 +11,7 @@ This folder contains the sprite sheet currently installed for the custom ChatGPT
 
 ## Sprite sheet
 
-- File: `voidling-current-pet-spritesheet.png`
+- File: `voidling-weightless-float.png`
 - Format: transparent RGBA PNG
 - Dimensions: 1536 x 1872 pixels
 - Grid: 8 columns x 9 rows
@@ -34,4 +34,6 @@ For a responsive interface, render at any desired display size while preserving 
 
 ## Provenance
 
-This is the active rebuilt VOiDling asset retrieved on July 22, 2026. The installed pet retains the original name and description: "A tiny shadow companion with orange horns, blue digital glow, and a curious eye for your work."
+This is the updated weightless-float VOiDling asset installed on August 2, 2026.
+The pet retains the original name and description: "A tiny shadow companion
+with orange horns, blue digital glow, and a curious eye for your work."

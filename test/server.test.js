@@ -142,7 +142,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.match(browserScript, /MASCOT_FRAME_COUNT = 6/);
   assert.match(browserScript, /MASCOT_ROW = 7/);
   assert.match(browserScript, /MASCOT_FRAME_WIDTH = 192/);
-  const mascotAsset = fs.readFileSync(path.join(root, 'public', 'voidling-current-pet-spritesheet.png'));
+  const mascotAsset = fs.readFileSync(path.join(root, 'public', 'voidling-weightless-float.png'));
   assert.equal(mascotAsset.readUInt32BE(16), 1536);
   assert.equal(mascotAsset.readUInt32BE(20), 1872);
 

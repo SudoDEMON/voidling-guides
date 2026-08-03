@@ -210,7 +210,7 @@ is no duration or total-size cap.
 ## VOiDling mascot
 
 The active 1536×1872 transparent sprite sheet is stored at
-`public/voidling-current-pet-spritesheet.png`; its grid has eight columns, nine
+`public/voidling-weightless-float.png`; its grid has eight columns, nine
 rows, and 192×208 cells. The homepage animates the first six frames of the
 typing row (zero-based row `7`). The original supplied `voidling-assets.zip`
 stays local and is ignored by Git. See `public/README.md` for the complete sheet

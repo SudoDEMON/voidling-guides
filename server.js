@@ -142,7 +142,7 @@ function dependencyHealth() {
 }
 
 function mascotUrl() {
-  const name = ['voidling-current-pet-spritesheet.png', 'voidling.png', 'voidling.webp', 'voidling.gif']
+  const name = ['voidling-weightless-float.png', 'voidling.png', 'voidling.webp', 'voidling.gif']
     .find(file => fs.existsSync(path.join(PUBLIC_ROOT, file)));
   return name ? `/${name}` : null;
 }
@@ -294,7 +294,7 @@ const adminController = createAdminController({
 function serveStatic(req, res, pathname) {
   const files = {
     '/': 'index.html', '/styles.css': 'styles.css', '/app.js': 'app.js',
-    '/voidling-current-pet-spritesheet.png': 'voidling-current-pet-spritesheet.png',
+    '/voidling-weightless-float.png': 'voidling-weightless-float.png',
     '/voidling.png': 'voidling.png', '/voidling.webp': 'voidling.webp', '/voidling.gif': 'voidling.gif',
     '/dad': 'dad.html', '/dad/': 'dad.html', '/dad/styles.css': 'dad.css', '/dad/app.js': 'dad.js'
   };
