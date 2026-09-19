@@ -22,7 +22,11 @@ for (const command of ['agy', 'yt-dlp', 'ffmpeg', 'ffprobe']) {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 5000 });
   const version = String(result.stdout || result.stderr || '').trim().split(/\r?\n/)[0];
   check(command, !result.error && result.status === 0, version || (result.error && result.error.message));
+  if (command === 'agy' && result.error?.code === 'ENOENT') {
+    console.log('     Install Antigravity CLI with npm run setup:agy, then reopen the terminal.');
+  }
 }
+console.log('INFO Antigravity sign-in is separate from the version check; run agy once to authenticate.');
 
 try {
   const catalogPath = process.env.VOIDLING_CATALOG_PATH || path.join(ROOT, 'data', 'approved-guides.md');

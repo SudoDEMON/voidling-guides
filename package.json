@@ -4,6 +4,7 @@
   "private": true,
   "description": "Kid-friendly LAN guide requester backed by YouTube, Antigravity, and local WebM playback.",
   "scripts": {
+    "setup:agy": "node scripts/install-agy.js",
     "web": "node server.js",
     "set-password": "node scripts/set-admin-password.js",
     "configure-lan": "node scripts/configure-lan.js",

@@ -18,14 +18,32 @@ Requirements:
 - `yt-dlp`
 - `ffmpeg` and `ffprobe`
 
-Check the machine:
+Install the Antigravity CLI once per machine:
+
+```bash
+npm run setup:agy
+```
+
+This skips an existing working `agy`. On Windows it installs Google's
+`Google.AntigravityCLI` package through WinGet for the current user. On macOS and
+Linux it runs [Google's official CLI installer](https://antigravity.google/docs/cli-getting-started),
+which installs under `~/.local/bin` and configures the shell environment. It
+verifies the installed binary before reporting success. Windows requires WinGet;
+macOS/Linux require Bash and either curl or wget.
+
+`npm install` only handles npm packages; it does not install these external
+tools. This project has no runtime npm dependencies. `setup:agy` installs only
+Antigravity; Node.js and the media tools listed above must also be installed.
+
+Open a fresh terminal after installation so it sees the updated PATH. Run `agy`
+once and complete Google's interactive sign-in, then check the machine:
 
 ```bash
 npm run doctor
 ```
 
-If Antigravity has not been authenticated yet, run `agy` once and sign in. Then
-start the site:
+The doctor checks that the executables run; it does not verify Google sign-in or
+make a model request. Once setup and sign-in are complete, start the site:
 
 ```bash
 npm run web
