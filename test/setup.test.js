@@ -17,19 +17,24 @@ test('setup leaves an existing working installation alone', async () => {
 
 test('Windows setup installs for the current user and verifies the binary outside stale PATH', async () => {
   const commands = [];
+  let installed = false;
   await installAgy({ platform: 'win32', env: { LOCALAPPDATA: 'local-app-data' }, log,
-    run(command, args) { commands.push([command, args]); return command === 'agy' ? missing : success; }
+    run(command, args) {
+      commands.push([command, args]);
+      if (command === 'winget') installed = true;
+      return installed ? success : missing;
+    }
   });
-  assert.equal(commands[1][0], 'winget');
-  assert.ok(commands[1][1].includes('Google.AntigravityCLI'));
-  assert.equal(commands[1][1][commands[1][1].indexOf('--scope') + 1], 'user');
-  assert.match(commands[2][0], /local-app-data.*WinGet.*agy\.exe$/);
-  assert.deepEqual(commands[2][1], ['--version']);
+  const installation = commands.find(([command]) => command === 'winget');
+  assert.ok(installation[1].includes('Google.AntigravityCLI'));
+  assert.equal(installation[1][installation[1].indexOf('--scope') + 1], 'user');
+  assert.match(commands.at(-1)[0], /local-app-data.*WinGet.*agy\.exe$/);
+  assert.deepEqual(commands.at(-1)[1], ['--version']);
 });
 
 test('setup reports installation failure without claiming success', async () => {
   await assert.rejects(installAgy({ platform: 'win32', log,
-    run(command) { return command === 'agy' ? missing : { status: 5 }; }
+    run(command) { return command === 'winget' ? { status: 5 } : missing; }
   }), /installation failed: exit 5/);
 });
 
@@ -51,12 +56,11 @@ test('Unix setup runs the downloaded file and removes temporary setup files', as
       return { ok: true, text: async () => '# installer fixture\n' };
     },
     run(command, args) {
-      if (command === 'agy') return missing;
       if (command === 'bash') {
         [installer] = args;
         assert.equal(fs.readFileSync(installer, 'utf8'), '# installer fixture\n');
       }
-      return success;
+      return installer ? success : missing;
     }
   });
   assert.equal(fs.existsSync(installer), false);
@@ -66,4 +70,14 @@ test('setup rejects an installer that leaves no runnable binary', async () => {
   await assert.rejects(installAgy({ platform: 'win32', log,
     run(command) { return command === 'winget' ? success : missing; }
   }), /installer finished, but/);
+});
+
+test('setup reuses a standard Windows installation when PATH is stale', async () => {
+  const executable = await installAgy({ platform: 'win32', log,
+    run(command) {
+      assert.notEqual(command, 'winget');
+      return command === 'agy' ? missing : success;
+    }
+  });
+  assert.match(executable, /WinGet.*agy\.exe$/);
 });

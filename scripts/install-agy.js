@@ -8,6 +8,23 @@ const { spawnSync } = require('child_process');
 
 const INSTALL_URL = 'https://antigravity.google/cli/install.sh';
 
+function findAgy({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
+  const candidates = ['agy'];
+  if (platform === 'win32') {
+    const local = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    candidates.push(path.join(local, 'Microsoft', 'WinGet', 'Links', 'agy.exe'),
+      path.join(local, 'agy', 'bin', 'agy.exe'));
+  } else if (platform === 'linux' || platform === 'darwin') {
+    candidates.push(path.join(env.HOME || os.homedir(), '.local', 'bin', 'agy'));
+  }
+  let probe;
+  for (const command of candidates) {
+    probe = { command, result: run(command, ['--version'], { env, encoding: 'utf8', timeout: 5000 }) };
+    if (probe.result.error?.code !== 'ENOENT') return probe;
+  }
+  return probe;
+}
+
 async function installAgy({
   platform = process.platform,
   env = process.env,
@@ -20,10 +37,10 @@ async function installAgy({
   }
 
   const probeOptions = { env, encoding: 'utf8', timeout: 5000 };
-  const existing = run('agy', ['--version'], probeOptions);
+  const { command, result: existing } = findAgy({ platform, env, run });
   if (!existing.error && existing.status === 0) {
     log(`Antigravity CLI is already installed: ${existing.stdout.trim()}`);
-    return;
+    return command;
   }
   if (!existing.error || existing.error.code !== 'ENOENT') {
     throw new Error('agy is present but cannot run. Resolve its --version error before reinstalling.');
@@ -67,6 +84,7 @@ async function installAgy({
     throw new Error(`The installer finished, but ${installedPath} could not run. Check the installer output.`);
   }
   log(`Antigravity CLI installed: ${installed.stdout.trim()}`);
+  return installedPath;
 }
 
 if (require.main === module) {
@@ -79,4 +97,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { installAgy };
+module.exports = { findAgy, installAgy };

@@ -18,29 +18,35 @@ Requirements:
 - `yt-dlp`
 - `ffmpeg` and `ffprobe`
 
-Install the Antigravity CLI once per machine:
+Check the machine and automatically install Antigravity CLI if it is missing:
 
 ```bash
-npm run setup:agy
+npm run doctor
 ```
 
-This skips an existing working `agy`. On Windows it installs Google's
+Doctor skips an existing working `agy`, including standard installations that
+are not yet visible on PATH. It reports a broken executable rather than
+overwriting it. On Windows it installs Google's
 `Google.AntigravityCLI` package through WinGet for the current user. On macOS and
 Linux it runs [Google's official CLI installer](https://antigravity.google/docs/cli-getting-started),
 which installs under `~/.local/bin` and configures the shell environment. It
 verifies the installed binary before reporting success. Windows requires WinGet;
 macOS/Linux require Bash and either curl or wget.
 
-`npm install` only handles npm packages; it does not install these external
-tools. This project has no runtime npm dependencies. `setup:agy` installs only
-Antigravity; Node.js and the media tools listed above must also be installed.
-
-Open a fresh terminal after installation so it sees the updated PATH. Run `agy`
-once and complete Google's interactive sign-in, then check the machine:
+For diagnostics without installing software or initializing local data, use:
 
 ```bash
-npm run doctor
+npm run doctor -- --check-only
 ```
+
+`npm run setup:agy` remains available to install Antigravity directly.
+`npm install` only handles npm packages; this project has no runtime npm
+dependencies. Doctor installs only a missing Antigravity CLI; Node.js and the
+media tools listed above must also be installed. Installation failures make
+doctor fail while it continues checking the other requirements.
+
+Open a fresh terminal after installation so it sees the updated PATH. Run `agy`
+once and complete Google's interactive sign-in.
 
 The doctor checks that the executables run; it does not verify Google sign-in or
 make a model request. Once setup and sign-in are complete, start the site:
@@ -217,6 +223,14 @@ queue, clients have a 30-second request cooldown, and duplicate game/guide
 requests reuse the existing job or video.
 
 ## Local data and audit log
+
+Approved games and pinned guide URLs live in `data/approved-guides.md` on the
+machine running the server. They are not committed or downloaded by `git pull`.
+To reuse the Linux catalog in a Windows checkout, back up any existing Windows
+catalog and copy that file into the Windows checkout's `data/` directory. The
+app rereads the catalog on each request. Keep each machine's LAN settings and
+Dad password setup local. Downloaded videos and library history are separate
+from the catalog and are not transferred by copying it.
 
 Generated data is ignored by Git and stored under `data/`:
 
