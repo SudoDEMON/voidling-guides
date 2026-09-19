@@ -10,7 +10,7 @@
     "configure-lan": "node scripts/configure-lan.js",
     "test": "node --test",
     "doctor": "node src/doctor.js",
-    "firewall": "sudo ./scripts/configure-firewall.sh"
+    "firewall": "node scripts/configure-firewall.js"
   },
   "engines": {
     "node": ">=22"

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT=3002
+PORT=${VOIDLING_PORT:-3002}
 MODE=${1:-add}
 LAN_CIDR=${2:-}
+
+if [[ ! $PORT =~ ^[1-9][0-9]{0,4}$ ]] || (( PORT > 65535 )); then
+  echo "VOIDLING_PORT must be an integer from 1 to 65535." >&2
+  exit 2
+fi
 
 if [[ -z $LAN_CIDR || ! $LAN_CIDR =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
   echo "Usage: sudo ./scripts/configure-firewall.sh [add|remove|replace] <lan-cidr> [previous-client ...]" >&2

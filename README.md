@@ -125,7 +125,7 @@ comma-separated `VOIDLING_ALLOWED_CLIENTS`; use `*` only when every device that
 can reach the port should have access. The host and port can be changed with
 `VOIDLING_HOST` and `VOIDLING_PORT`.
 
-On systems using UFW with a default-drop input policy, allow that same subnet:
+Allow that same subnet through the host firewall:
 
 ```bash
 npm run firewall -- add 192.168.1.0/24
@@ -137,9 +137,25 @@ Remove the rule later with:
 npm run firewall -- remove 192.168.1.0/24
 ```
 
-The helper changes no other UFW rules. It is intentionally not run by the web
-application because it requires your sudo password and changes machine-level
-network access.
+The command selects Windows Firewall on Windows and UFW on Linux. On Windows,
+open PowerShell or Windows Terminal **as administrator** before running it;
+Windows sudo does not need to be enabled. Linux uses `sudo` and requires UFW.
+Other operating systems must configure their firewall separately.
+
+Rules allow inbound TCP on `VOIDLING_PORT` (default `3002`) only from the
+specified subnet. Use the same port setting when starting the server and when
+adding or removing rules. Windows additionally limits the rule to the Node
+executable running the command, across Windows network profiles; this works
+when Windows labels a home LAN Public. Repeating `add` updates the same rule,
+and `remove` only removes that helper-managed subnet/port rule. Rerun `add` if
+Node moves to a different executable path.
+
+To replace an earlier subnet, use
+`npm run firewall -- replace 10.10.1.0/24 192.168.1.0/24`. The Windows helper
+only removes its own named rules for the previous clients. Firewall rules do
+not change the application's client allowlist: also run `configure-lan` for
+the intended subnet and restart the server. The web application never changes
+machine-level firewall settings itself.
 
 ## Approve games and known guides manually
 
