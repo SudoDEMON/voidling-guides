@@ -281,3 +281,10 @@ The service intentionally has no runtime npm dependencies. Its HTTP surface is
 limited to static site assets, three kid-facing read APIs, the request and
 confirmation APIs, registered completed-video playback with HTTP byte ranges,
 and the separately authenticated Dad routes available to approved LAN clients.
+
+## Local CI migration
+
+The `.forgejo/workflows/` checks run on the isolated Linux worker with one job
+at a time. GitHub workflows stay available until the matching Forgejo checks
+pass; GitHub remains the issue, pull-request and release archive. Build jobs
+do not receive production deployment credentials.

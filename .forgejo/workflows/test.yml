@@ -1,0 +1,20 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: linux-cpu
+    steps:
+      - uses: https://github.com/actions/checkout@v6
+      - uses: https://github.com/actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm test
