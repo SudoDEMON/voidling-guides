@@ -33,7 +33,7 @@ const ALLOWED_CLIENTS = new Set(
 const MAX_BODY = 16 * 1024;
 const MAX_QUEUED = 5;
 const MAX_PENDING_GAME_REQUESTS = 20;
-const REQUEST_COOLDOWN_MS = 30_000;
+const REQUEST_COOLDOWN_MS = 10_000;
 const SAFE_FAILURE = "I couldn't find the exact guide. Please go get approval from your Dad for the video first.";
 const MIME = {
   '.css': 'text/css; charset=utf-8', '.gif': 'image/gif', '.html': 'text/html; charset=utf-8',

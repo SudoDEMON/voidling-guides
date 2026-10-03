@@ -179,7 +179,7 @@ and automated review cannot guarantee every externally created video's content.
 Use a pinned guide when a specific video needs explicit parental approval.
 
 Only one download runs at a time. Up to five more requests may wait in the
-queue, clients have a 30-second request cooldown, and duplicate game/guide
+queue, clients have a 10-second request cooldown, and duplicate game/guide
 requests reuse the existing job or video.
 
 ## Local data and audit log
