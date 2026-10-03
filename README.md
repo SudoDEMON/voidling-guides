@@ -18,14 +18,38 @@ Requirements:
 - `yt-dlp`
 - `ffmpeg` and `ffprobe`
 
-Check the machine:
+Check the machine and automatically install Antigravity CLI if it is missing:
 
 ```bash
 npm run doctor
 ```
 
-If Antigravity has not been authenticated yet, run `agy` once and sign in. Then
-start the site:
+Doctor skips an existing working `agy`, including standard installations that
+are not yet visible on PATH. It reports a broken executable rather than
+overwriting it. On Windows it installs Google's
+`Google.AntigravityCLI` package through WinGet for the current user. On macOS and
+Linux it runs [Google's official CLI installer](https://antigravity.google/docs/cli-getting-started),
+which installs under `~/.local/bin` and configures the shell environment. It
+verifies the installed binary before reporting success. Windows requires WinGet;
+macOS/Linux require Bash and either curl or wget.
+
+For diagnostics without installing software or initializing local data, use:
+
+```bash
+npm run doctor -- --check-only
+```
+
+`npm run setup:agy` remains available to install Antigravity directly.
+`npm install` only handles npm packages; this project has no runtime npm
+dependencies. Doctor installs only a missing Antigravity CLI; Node.js and the
+media tools listed above must also be installed. Installation failures make
+doctor fail while it continues checking the other requirements.
+
+Open a fresh terminal after installation so it sees the updated PATH. Run `agy`
+once and complete Google's interactive sign-in.
+
+The doctor checks that the executables run; it does not verify Google sign-in or
+make a model request. Once setup and sign-in are complete, start the site:
 
 ```bash
 npm run web
@@ -107,7 +131,7 @@ comma-separated `VOIDLING_ALLOWED_CLIENTS`; use `*` only when every device that
 can reach the port should have access. The host and port can be changed with
 `VOIDLING_HOST` and `VOIDLING_PORT`.
 
-On systems using UFW with a default-drop input policy, allow that same subnet:
+Allow that same subnet through the host firewall:
 
 ```bash
 npm run firewall -- add 192.168.1.0/24
@@ -119,9 +143,25 @@ Remove the rule later with:
 npm run firewall -- remove 192.168.1.0/24
 ```
 
-The helper changes no other UFW rules. It is intentionally not run by the web
-application because it requires your sudo password and changes machine-level
-network access.
+The command selects Windows Firewall on Windows and UFW on Linux. On Windows,
+open PowerShell or Windows Terminal **as administrator** before running it;
+Windows sudo does not need to be enabled. Linux uses `sudo` and requires UFW.
+Other operating systems must configure their firewall separately.
+
+Rules allow inbound TCP on `VOIDLING_PORT` (default `3002`) only from the
+specified subnet. Use the same port setting when starting the server and when
+adding or removing rules. Windows additionally limits the rule to the Node
+executable running the command, across Windows network profiles; this works
+when Windows labels a home LAN Public. Repeating `add` updates the same rule,
+and `remove` only removes that helper-managed subnet/port rule. Rerun `add` if
+Node moves to a different executable path.
+
+To replace an earlier subnet, use
+`npm run firewall -- replace 10.10.1.0/24 192.168.1.0/24`. The Windows helper
+only removes its own named rules for the previous clients. Firewall rules do
+not change the application's client allowlist: also run `configure-lan` for
+the intended subnet and restart the server. The web application never changes
+machine-level firewall settings itself.
 
 ## Approve games and known guides manually
 
@@ -184,6 +224,14 @@ requests reuse the existing job or video.
 
 ## Local data and audit log
 
+Approved games and pinned guide URLs live in `data/approved-guides.md` on the
+machine running the server. They are not committed or downloaded by `git pull`.
+To reuse the Linux catalog in a Windows checkout, back up any existing Windows
+catalog and copy that file into the Windows checkout's `data/` directory. The
+app rereads the catalog on each request. Keep each machine's LAN settings and
+Dad password setup local. Downloaded videos and library history are separate
+from the catalog and are not transferred by copying it.
+
 Generated data is ignored by Git and stored under `data/`:
 
 - `data/library.json` — persistent job/library state
@@ -233,3 +281,10 @@ The service intentionally has no runtime npm dependencies. Its HTTP surface is
 limited to static site assets, three kid-facing read APIs, the request and
 confirmation APIs, registered completed-video playback with HTTP byte ranges,
 and the separately authenticated Dad routes available to approved LAN clients.
+
+## Local CI migration
+
+The `.forgejo/workflows/` checks run on the isolated Linux worker with one job
+at a time. GitHub workflows stay available until the matching Forgejo checks
+pass; GitHub remains the issue, pull-request and release archive. Build jobs
+do not receive production deployment credentials.
