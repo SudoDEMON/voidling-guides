@@ -26,7 +26,6 @@ const { loadSettings, writeSettings } = require('../src/settings');
 const {
   COMPLETE_TTL_MS,
   FAILED_TTL_MS,
-  RESOLVED_GAME_REQUEST_TTL_MS,
   LibraryStore
 } = require('../src/store');
 
@@ -285,7 +284,7 @@ test('store persists, marks interrupted work failed, and cleans retention', t =>
   assert.equal(fs.existsSync(video), false);
 });
 
-test('store migrates and retains game requests until Dad reviews them', t => {
+test('store migrates and retains pending and reviewed game request history', t => {
   const directory = temporaryDirectory(t);
   const filePath = path.join(directory, 'library.json');
   const now = Date.now();
@@ -297,17 +296,17 @@ test('store migrates and retains game requests until Dad reviews them', t => {
 
   store.addGameRequest({
     id: 'pending', key: 'roblox:pending', platform: 'Roblox',
-    name: 'Pending', status: 'pending', createdAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS * 2).toISOString()
+    name: 'Pending', status: 'pending', createdAt: new Date(now - (30 * 24 * 60 * 60 * 1000) * 2).toISOString()
   });
   store.addGameRequest({
     id: 'resolved', key: 'roblox:resolved', platform: 'Roblox',
     name: 'Resolved', status: 'approved',
-    createdAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS * 2).toISOString(),
-    resolvedAt: new Date(now - RESOLVED_GAME_REQUEST_TTL_MS - 1).toISOString()
+    createdAt: new Date(now - (30 * 24 * 60 * 60 * 1000) * 2).toISOString(),
+    resolvedAt: new Date(now - (30 * 24 * 60 * 60 * 1000) - 1).toISOString()
   });
 
   store.cleanup();
-  assert.deepEqual(store.state.gameRequests.map(request => request.id), ['pending']);
+  assert.deepEqual(store.state.gameRequests.map(request => request.id), ['pending', 'resolved']);
 });
 
 test('audit log records requests and safely flattens fields', t => {

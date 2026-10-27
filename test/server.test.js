@@ -151,12 +151,12 @@ test('LAN server exposes only narrow static and API routes', async t => {
   const dadPageBody = await dadPage.text();
   assert.match(dadPageBody, /Dad Approval/);
   assert.match(dadPageBody, /id="approvedGameList"/);
-  assert.match(dadPageBody, /permanently deletes its downloaded WebM file/);
-  assert.match(dadPageBody, /immediately downloaded into the kids’ guide library/);
+  assert.match(dadPageBody, /deletes its downloaded WebM/);
+  assert.match(dadPageBody, /Check and approve also downloads/);
   const dadScript = await fetch(`${dadOrigin}/dad/app.js`).then(response => response.text());
-  assert.match(dadScript, /method: 'DELETE'/);
-  assert.match(dadScript, /Remove entry & video/);
-  assert.match(dadScript, /message\(messageNode, state\.message, 'success'\);\s+renderDashboard\(state\)/);
+  assert.match(dadScript, /mutate\(url, 'DELETE'/);
+  assert.match(dadScript, /permanently delete its downloaded WebM/);
+  assert.match(dadScript, /renderDashboard\(state\);\s+message\(messageNode, state\.message, 'success'\)/);
   const dadState = await fetch(`${dadOrigin}/dad/api/state`).then(response => response.json());
   assert.deepEqual(dadState, { configured: true, authenticated: false });
 
@@ -214,6 +214,32 @@ test('LAN server exposes only narrow static and API routes', async t => {
   assert.equal(addedState.games.some(game => game.name === 'A Newly Approved Game'), true);
   assert.match(fs.readFileSync(catalogPath, 'utf8'), /## Roblox: A Newly Approved Game/);
 
+  const editGame = await fetch(`${origin}/dad/api/games/${addedState.game.id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json', origin, cookie },
+    body: JSON.stringify({ platform: 'Roblox', name: 'Corrected Game Name' })
+  });
+  assert.equal(editGame.status, 200);
+  assert.equal((await editGame.json()).game.id, addedState.game.id);
+  const publicEditedGames = await fetch(`${origin}/api/games`).then(response => response.json());
+  assert.equal(publicEditedGames.games.find(game => game.id === addedState.game.id).name, 'Corrected Game Name');
+  const requestEditedGame = await fetch(`${origin}/api/game-requests`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: 'ROBLOX', name: 'corrected game name' })
+  });
+  assert.equal(requestEditedGame.status, 409);
+  const addPlatform = await fetch(`${origin}/dad/api/platforms`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin, cookie }, body: JSON.stringify({ name: 'Desktop' })
+  });
+  assert.equal(addPlatform.status, 201);
+  const desktop = (await addPlatform.json()).platforms.find(platform => platform.name === 'Desktop');
+  const removePlatform = await fetch(`${origin}/dad/api/platforms/${desktop.id}`, {
+    method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
+  });
+  assert.equal(removePlatform.status, 200);
+  const history = await fetch(`${origin}/dad/api/history`, { headers: { cookie } });
+  assert.equal(history.status, 200);
+  assert.equal(Array.isArray((await history.json()).entries), true);
+
   const blockedGameRemoval = await fetch(`${origin}/dad/api/games/${encodeURIComponent(approvedGame.id)}`, {
     method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie }, body: '{}'
   });
@@ -224,7 +250,7 @@ test('LAN server exposes only narrow static and API routes', async t => {
   });
   const removedGameState = await removeAddedGame.json();
   assert.equal(removeAddedGame.status, 200);
-  assert.equal(removedGameState.games.some(game => game.name === 'A Newly Approved Game'), false);
+  assert.equal(removedGameState.games.some(game => game.id === addedState.game.id), false);
 
   const removePin = await fetch(`${origin}/dad/api/pins`, {
     method: 'DELETE', headers: { 'content-type': 'application/json', origin, cookie },

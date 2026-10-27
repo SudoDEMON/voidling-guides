@@ -29,6 +29,16 @@ class RequestAudit {
     fs.appendFileSync(this.filePath, `[${parts.map(field).join(' - ')}]\n`, { mode: 0o600 });
   }
 
+  guideHistory(offset = 0, limit = 30) {
+    offset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+    const entries = fs.existsSync(this.filePath) ? fs.readFileSync(this.filePath, 'utf8')
+      .split(/\r?\n/)
+      .filter(line => /^\[[^\]]+? - (REQUESTED|DUPLICATE|SUGGESTED|CONFIRMED|DECLINED|SERVED|FAILED|DAD_REQUEST_UPDATED|DAD_REQUEST_REMOVED|DAD_PIN_ADDED|DAD_PIN_REPLACED) - /.test(line))
+      .reverse() : [];
+    return { entries: entries.slice(offset, offset + limit), total: entries.length, offset,
+      nextOffset: offset + limit < entries.length ? offset + limit : null };
+  }
+
   recent(limit = 40) {
     if (!fs.existsSync(this.filePath)) return [];
     return fs.readFileSync(this.filePath, 'utf8')

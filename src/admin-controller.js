@@ -5,11 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const { AdminSessions, dadPostAllowed, verifyPassword } = require('./admin-auth');
 const {
-  addApprovedGame, loadCatalog, removeApprovedGame, removePinnedGuide, upsertPinnedGuide
+  addApprovedGame, updateApprovedGame, loadCatalog, removeApprovedGame, upsertPinnedGuide, gameKey,
+  addPlatform, updatePlatform, removePlatform, loadPlatforms
 } = require('./catalog');
-const { validatePinnedGuide } = require('./discovery');
+const { createPinHandler } = require('./admin-pins');
 const { normalizeAddress } = require('./network');
-const { normalizeKey, stableId, validateGuideName } = require('./safety');
+const { normalizeKey, validateGuideName } = require('./safety');
 
 function queueApprovedGuide(options, game, badge, selected, client) {
   const key = `${game.id}:${normalizeKey(badge)}`;
@@ -24,7 +25,8 @@ function queueApprovedGuide(options, game, badge, selected, client) {
   const fields = {
     key, gameId: game.id, game: game.name, platform: game.platform, badge,
     status: 'queued', message: 'Dad approved this video. Waiting to download...',
-    createdAt, requestClient: client, filePath: options.outputPathFor(game, badge),
+    createdAt: existing?.createdAt || createdAt, requestClient: existing?.requestClient || client,
+    filePath: existing?.filePath || options.outputPathFor(game, badge), sourceUrl: selected.webpageUrl,
     approvedSelection, pendingSelection: null, suggestedBadge: null,
     sourceTitle: selected.title, channel: selected.channel,
     forceDownload: true, completedAt: null, finishedAt: null,
@@ -49,23 +51,23 @@ function createAdminController(options) {
     }));
     const requests = options.store.state.guides.slice()
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-      .slice(0, 30)
       .map(guide => ({
         id: guide.id, gameId: guide.gameId, game: guide.game, platform: guide.platform,
         badge: guide.badge, suggestedBadge: guide.suggestedBadge || null,
         status: guide.status, message: guide.message, sourceTitle: guide.sourceTitle || '',
-        requestClient: guide.requestClient || '', createdAt: guide.createdAt
+        requestClient: guide.requestClient || '', createdAt: guide.createdAt,
+        url: guide.sourceUrl || guide.approvedSelection?.webpageUrl || guide.pendingSelection?.webpageUrl || ''
       }));
     const gameRequests = options.store.state.gameRequests.slice()
       .sort((a, b) => (a.status === 'pending' ? -1 : 1) - (b.status === 'pending' ? -1 : 1)
         || Date.parse(b.createdAt) - Date.parse(a.createdAt))
-      .slice(0, 40)
       .map(request => ({
         id: request.id, platform: request.platform, name: request.name,
         status: request.status, createdAt: request.createdAt,
         resolvedAt: request.resolvedAt || null, requestClient: request.requestClient || ''
       }));
-    return { games, requests, gameRequests, log: options.audit.recent(50) };
+    return { games, platforms: loadPlatforms(options.catalogPath), requests, gameRequests,
+      history: options.audit.guideHistory(), log: options.audit.recent(50) };
   }
 
   function rejectMutation(req, res, action) {
@@ -96,12 +98,12 @@ function createAdminController(options) {
 
   async function updateRequest(req, res, id) {
     if (rejectMutation(req, res, 'Request editing')) return;
+    const body = await options.readJson(req);
     const guide = options.store.state.guides.find(item => item.id === id);
     if (!guide) return options.sendJson(res, 404, { error: 'That request no longer exists.' });
     if (['queued', 'searching', 'checking', 'downloading'].includes(guide.status)) {
       return options.sendJson(res, 409, { error: 'Wait for the current guide work to finish before editing it.' });
     }
-    const body = await options.readJson(req);
     const game = loadCatalog(options.catalogPath).find(item => item.id === String(body.gameId || ''));
     if (!game) return options.sendJson(res, 400, { error: 'Please choose an approved game.' });
     const badge = validateGuideName(body.guide ?? body.badge);
@@ -115,7 +117,7 @@ function createAdminController(options) {
     const changes = { gameId: game.id, game: game.name, platform: game.platform, badge, key };
     let requeued = false;
     if (guide.status === 'failed' || guide.status === 'needs_confirmation') {
-      const acceptedSuggestion = guide.status === 'needs_confirmation'
+      const acceptedSuggestion = guide.gameId === game.id && guide.status === 'needs_confirmation'
         && normalizeKey(guide.suggestedBadge) === normalizeKey(badge)
         && guide.pendingSelection;
       Object.assign(changes, {
@@ -126,6 +128,12 @@ function createAdminController(options) {
       if (!acceptedSuggestion) Object.assign(changes, { sourceTitle: '', channel: '' });
       requeued = true;
     }
+    const oldGame = loadCatalog(options.catalogPath).find(item => item.id === guide.gameId);
+    const pin = oldGame?.pinned[normalizeKey(guide.badge)];
+    if (pin) {
+      upsertPinnedGuide(options.catalogPath, game.id, badge, pin.url, { gameId: oldGame.id, id: pin.id });
+    }
+    if (guide.status === 'complete' && guide.approvedSelection) changes.approvedSelection = { ...guide.approvedSelection, canonicalBadge: badge };
     const updated = options.store.update(guide.id, changes);
     options.audit.append('DAD_REQUEST_UPDATED', {
       game: game.name, badge, client: normalizeAddress(req.socket.remoteAddress),
@@ -138,11 +146,27 @@ function createAdminController(options) {
     });
   }
 
+  const handlePins = createPinHandler(options, { rejectMutation, state, busyStatuses, queueApprovedGuide });
+
+  function refreshGameLabels(games) {
+    for (const guide of options.store.state.guides) {
+      const game = games.find(item => item.id === guide.gameId);
+      if (game) Object.assign(guide, { game: game.name, platform: game.platform });
+    }
+    options.store.save();
+  }
+
   async function handle(req, res, pathname) {
     if (req.method === 'GET' && pathname === '/dad/api/state') {
       const authenticated = sessions.authenticated(req);
       const configured = fs.existsSync(options.authPath);
       options.sendJson(res, 200, authenticated ? { configured, authenticated, ...state() } : { configured, authenticated });
+      return true;
+    }
+    if (req.method === 'GET' && pathname === '/dad/api/history') {
+      if (!sessions.authenticated(req)) return options.sendJson(res, 401, { error: 'Please sign in again.' });
+      const offset = new URL(req.url, 'http://localhost').searchParams.get('offset');
+      options.sendJson(res, 200, options.audit.guideHistory(Number(offset)));
       return true;
     }
     if (req.method === 'POST' && pathname === '/dad/api/login') {
@@ -182,6 +206,34 @@ function createAdminController(options) {
       options.sendJson(res, 200, { authenticated: false }, { 'set-cookie': sessions.cookie('', 0) });
       return true;
     }
+    const platformMatch = pathname.match(/^\/dad\/api\/platforms\/([a-z0-9-]{3,160})$/i);
+    if ((req.method === 'POST' && pathname === '/dad/api/platforms')
+      || (platformMatch && ['PATCH', 'DELETE'].includes(req.method))) {
+      if (rejectMutation(req, res, 'Platform management')) return true;
+      const body = await options.readJson(req);
+      const old = platformMatch && loadPlatforms(options.catalogPath).find(item => item.id === platformMatch[1]);
+      if (platformMatch && !old) return options.sendJson(res, 404, { error: 'That platform no longer exists.' });
+      const games = loadCatalog(options.catalogPath);
+      if (old && req.method === 'DELETE' && (games.some(game => normalizeKey(game.platform) === normalizeKey(old.name))
+        || options.store.state.guides.some(guide => normalizeKey(guide.platform) === normalizeKey(old.name)))) {
+        return options.sendJson(res, 409, { error: 'Move or remove the games and guides using this platform first.' });
+      }
+      if (old && req.method === 'PATCH' && options.store.state.guides.some(guide =>
+        normalizeKey(guide.platform) === normalizeKey(old.name) && busyStatuses.has(guide.status))) {
+        return options.sendJson(res, 409, { error: 'Wait for this platform’s guide work to finish before editing it.' });
+      }
+      const platform = req.method === 'POST' ? addPlatform(options.catalogPath, body.name)
+        : req.method === 'PATCH' ? updatePlatform(options.catalogPath, old.id, body.name)
+          : removePlatform(options.catalogPath, old.id);
+      if (req.method === 'PATCH') refreshGameLabels(loadCatalog(options.catalogPath));
+      options.audit.append(`DAD_PLATFORM_${req.method === 'POST' ? 'ADDED' : req.method === 'PATCH' ? 'UPDATED' : 'REMOVED'}`, {
+        client: normalizeAddress(req.socket.remoteAddress), reason: old ? `${old.name} -> ${platform.name}` : platform.name
+      });
+      options.sendJson(res, req.method === 'POST' ? 201 : 200, {
+        message: `${req.method === 'DELETE' ? 'Removed' : 'Saved'} platform ${platform.name}.`, ...state()
+      });
+      return true;
+    }
     if (req.method === 'POST' && pathname === '/dad/api/games') {
       if (rejectMutation(req, res, 'Game approval')) return true;
       const body = await options.readJson(req);
@@ -193,6 +245,23 @@ function createAdminController(options) {
       return true;
     }
     const gameMatch = pathname.match(/^\/dad\/api\/games\/([a-z0-9-]{3,160})$/i);
+    if (req.method === 'PATCH' && gameMatch) {
+      if (rejectMutation(req, res, 'Game editing')) return true;
+      const body = await options.readJson(req);
+      const old = loadCatalog(options.catalogPath).find(item => item.id === gameMatch[1]);
+      if (!old) return options.sendJson(res, 404, { error: 'That approved game no longer exists.' });
+      if (options.store.state.guides.some(guide => guide.gameId === old.id && busyStatuses.has(guide.status))) {
+        return options.sendJson(res, 409, { error: 'Wait for this game’s guide work to finish before editing it.' });
+      }
+      const game = updateApprovedGame(options.catalogPath, old.id, body.platform, body.name);
+      refreshGameLabels([game]);
+      options.audit.append('DAD_GAME_UPDATED', {
+        game: game.name, client: normalizeAddress(req.socket.remoteAddress),
+        reason: `${old.platform}: ${old.name} -> ${game.platform}: ${game.name}`
+      });
+      options.sendJson(res, 200, { message: `Saved ${game.name}.`, game, ...state() });
+      return true;
+    }
     if (req.method === 'DELETE' && gameMatch) {
       if (rejectMutation(req, res, 'Game removal')) return true;
       const game = loadCatalog(options.catalogPath).find(item => item.id === gameMatch[1]);
@@ -225,20 +294,19 @@ function createAdminController(options) {
     }
     if (req.method === 'POST' && gameRequestMatch) {
       if (rejectMutation(req, res, 'Game request review')) return true;
+      const body = await options.readJson(req);
       const request = options.store.state.gameRequests.find(item => item.id === gameRequestMatch[1]);
       if (!request || request.status !== 'pending') {
         options.sendJson(res, 409, { error: 'That game request is no longer waiting for review.' });
         return true;
       }
-      const body = await options.readJson(req);
       if (!['approve', 'decline'].includes(body.decision)) {
         options.sendJson(res, 400, { error: 'Choose Approve or Decline.' });
         return true;
       }
       const resolvedAt = new Date().toISOString();
       if (body.decision === 'approve') {
-        const gameId = stableId(`${request.platform}:${request.name}`);
-        const existing = loadCatalog(options.catalogPath).find(game => game.id === gameId);
+        const existing = loadCatalog(options.catalogPath).find(game => gameKey(game.platform, game.name) === gameKey(request.platform, request.name));
         const game = existing || addApprovedGame(options.catalogPath, request.platform, request.name);
         options.store.updateGameRequest(request.id, { status: 'approved', resolvedAt, gameId: game.id });
         options.audit.append('DAD_GAME_REQUEST_APPROVED', {
@@ -256,57 +324,7 @@ function createAdminController(options) {
       options.sendJson(res, 200, { message: `Declined ${request.name}.`, ...state() });
       return true;
     }
-    if (req.method === 'POST' && pathname === '/dad/api/pins') {
-      if (rejectMutation(req, res, 'Approval')) return true;
-      const body = await options.readJson(req);
-      const game = loadCatalog(options.catalogPath).find(item => item.id === String(body.gameId || ''));
-      if (!game) {
-        options.sendJson(res, 400, { error: 'Please choose an approved game.' });
-        return true;
-      }
-      const badge = validateGuideName(body.guide ?? body.badge);
-      const key = `${game.id}:${normalizeKey(badge)}`;
-      const busy = options.store.state.guides.find(guide => guide.key === key && busyStatuses.has(guide.status));
-      if (busy) {
-        options.sendJson(res, 409, { error: 'Wait for the current guide download to finish before replacing its video.' });
-        return true;
-      }
-      const selected = await validatePinnedGuide(body.url);
-      const result = upsertPinnedGuide(options.catalogPath, game.id, badge, selected.webpageUrl);
-      const client = normalizeAddress(req.socket.remoteAddress);
-      const queued = queueApprovedGuide(options, game, badge, selected, client);
-      options.audit.append(result.replaced ? 'DAD_PIN_REPLACED' : 'DAD_PIN_ADDED', {
-        game: game.name, badge, client,
-        video: selected.title, url: selected.webpageUrl,
-        reason: queued.reused ? 'Approved URL and refreshed library download' : 'Approved URL and queued library download'
-      });
-      options.sendJson(res, result.replaced ? 200 : 201, {
-        message: result.replaced
-          ? `Updated ${badge}. The approved video is downloading now.`
-          : `Approved ${badge}. The video is downloading now.`,
-        pin: { gameId: game.id, badge, url: selected.webpageUrl, title: selected.title }, ...state()
-      });
-      return true;
-    }
-    if (req.method === 'DELETE' && pathname === '/dad/api/pins') {
-      if (rejectMutation(req, res, 'Approved video removal')) return true;
-      const body = await options.readJson(req);
-      const game = loadCatalog(options.catalogPath).find(item => item.id === String(body.gameId || ''));
-      if (!game) return options.sendJson(res, 404, { error: 'That approved game no longer exists.' });
-      const badge = validateGuideName(body.guide ?? body.badge);
-      const busy = options.store.state.guides.find(guide => guide.gameId === game.id
-        && normalizeKey(guide.badge) === normalizeKey(badge) && busyStatuses.has(guide.status));
-      if (busy) return options.sendJson(res, 409, { error: 'Wait for this guide to finish before removing its approved video.' });
-      const result = removePinnedGuide(options.catalogPath, game.id, badge);
-      options.audit.append('DAD_PIN_REMOVED', {
-        game: game.name, badge: result.pin.badge, client: normalizeAddress(req.socket.remoteAddress),
-        url: result.pin.url, reason: 'Removed manually approved video'
-      });
-      options.sendJson(res, 200, {
-        message: `Removed the approved video for ${result.pin.badge}.`, ...state()
-      });
-      return true;
-    }
+    if (await handlePins(req, res, pathname) || res.writableEnded) return true;
     const requestMatch = pathname.match(/^\/dad\/api\/requests\/([0-9a-f-]{36})$/i);
     if (req.method === 'DELETE' && requestMatch) {
       if (rejectMutation(req, res, 'Guide removal')) return true;
@@ -332,7 +350,13 @@ function createAdminController(options) {
     return false;
   }
 
-  return { handle, state };
+  return {
+    async handle(req, res, pathname) {
+      const handled = await handle(req, res, pathname);
+      return handled || res.writableEnded;
+    },
+    state
+  };
 }
 
 module.exports = { createAdminController, queueApprovedGuide };

@@ -76,3 +76,24 @@ button:disabled { opacity: .55; cursor: wait; }
   .section-head, .request-top { align-items: start; flex-direction: column; }
   .pin-form > button { width: 100%; }
 }
+
+.management-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+.management-nav a { color: var(--blue); padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; font-weight: 800; text-decoration: none; }
+.management-nav button { margin-left: auto; }
+.subheading { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.request-item h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.request-top > * { min-width: 0; }
+.guide-url { display: block; color: var(--blue); overflow-wrap: anywhere; font-size: .85rem; margin-top: 8px; }
+.history-panel { margin-top: 28px; }
+summary { cursor: pointer; font-weight: 800; color: var(--blue); }
+.form-actions { flex-wrap: wrap; }
+.edit-panel { padding: 20px; margin-top: 24px; border: 1px solid var(--orange); border-radius: 12px; }
+#moreHistoryButton { margin-top: 14px; }
+.panel, form, label, .game-list > * { min-width: 0; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+@media (max-width: 480px) {
+  .site-header { flex-wrap: wrap; }
+  .management-nav button { margin-left: 0; }
+  .form-actions > button { width: 100%; }
+  .game-list { grid-template-columns: 1fr; }
+}

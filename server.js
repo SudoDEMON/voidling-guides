@@ -9,11 +9,11 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { createAdminController } = require('./src/admin-controller');
 const { RequestAudit } = require('./src/audit');
-const { loadCatalog, publicGames } = require('./src/catalog');
+const { loadCatalog, publicGames, gameKey } = require('./src/catalog');
 const { convertGuide } = require('./src/converter');
 const { discoverGuide, needsClarification, validatePinnedGuide } = require('./src/discovery');
 const { addressAllowed, normalizeAddress } = require('./src/network');
-const { normalizeKey, slug, stableId, validateGameName, validateGuideName, validatePlatform } = require('./src/safety');
+const { normalizeKey, slug, validateGameName, validateGuideName, validatePlatform } = require('./src/safety');
 const { ensureLocalCatalog, loadSettings } = require('./src/settings');
 const { LibraryStore } = require('./src/store');
 
@@ -363,7 +363,7 @@ async function handleRequest(req, res) {
     const platform = validatePlatform(body.platform);
     const name = validateGameName(body.name);
     const key = normalizeKey(`${platform}:${name}`);
-    if (loadCurrentCatalog().some(game => game.id === stableId(`${platform}:${name}`))) {
+    if (loadCurrentCatalog().some(game => gameKey(game.platform, game.name) === gameKey(platform, name))) {
       return sendJson(res, 409, { error: 'That game is already in the approved game list.' });
     }
     const duplicate = store.findPendingGameRequest(key);

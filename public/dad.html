@@ -37,99 +37,96 @@
     </section>
 
     <div id="dashboard" hidden>
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <p class="step">MANUAL APPROVAL</p>
-            <h2>Pin a YouTube guide</h2>
-          </div>
-          <button class="quiet-button" id="logoutButton" type="button">Lock page</button>
-        </div>
-        <p class="panel-copy">The video is checked, saved, and immediately downloaded into the kids’ guide library.</p>
-        <form class="pin-form" id="pinForm">
-          <label>
-            <span>Approved game</span>
-            <select id="gameId" required></select>
-          </label>
-          <label>
-            <span>Full guide name</span>
-            <input id="guide" maxlength="64" placeholder="Chara or Sans Skeleton" required>
-          </label>
-          <label class="url-field">
-            <span>YouTube video URL</span>
-            <input id="videoUrl" type="url" placeholder="https://youtu.be/VIDEO_ID" required>
-          </label>
-          <button type="submit" id="approveButton">Check and approve</button>
-        </form>
-        <p class="message" id="approvalMessage" role="status" aria-live="polite"></p>
-      </section>
+      <nav class="management-nav" aria-label="Dad management">
+        <a href="#gamesSection">Games</a><a href="#platformsSection">Platforms</a><a href="#guidesSection">Guides</a>
+        <button class="quiet-button" id="logoutButton" type="button">Lock page</button>
+      </nav>
 
-      <section class="panel">
-        <p class="step">GAME REQUESTS</p>
-        <h2>Games waiting for Dad</h2>
-        <p class="panel-copy">Approving a request adds it to the kids’ game dropdown immediately.</p>
-        <div class="request-list" id="gameRequestList"></div>
-      </section>
-
-      <section class="panel">
-        <p class="step">APPROVED GAMES</p>
-        <h2>Add a game</h2>
-        <p class="panel-copy">New games appear in the kids’ dropdown immediately.</p>
+      <section class="panel" id="gamesSection" aria-labelledby="gamesHeading">
+        <p class="step">01 · GAME MANAGEMENT</p>
+        <h2 id="gamesHeading">Games</h2>
+        <p class="panel-copy">Manage approved games and review the games the kids want added.</p>
+        <h3 id="gameFormHeading">Add a game</h3>
         <form class="game-form" id="gameForm">
-          <label>
-            <span>Platform</span>
-            <input id="newPlatform" maxlength="32" value="Roblox" required>
-          </label>
-          <label>
-            <span>Full game name</span>
-            <input id="newGameName" maxlength="100" placeholder="Full game name" required>
-          </label>
-          <button type="submit" id="addGameButton">Add approved game</button>
+          <label><span>Game name</span><input id="newGameName" maxlength="100" required></label>
+          <label><span>Platform</span><select id="newPlatform" required></select></label>
+          <div class="form-actions">
+            <button type="submit" id="addGameButton">Add approved game</button>
+            <button type="button" class="quiet-button" id="cancelGameButton" hidden>Cancel</button>
+          </div>
         </form>
         <p class="message" id="gameMessage" role="status" aria-live="polite"></p>
+        <h3 class="subheading">Approved Games</h3>
         <div class="game-list" id="approvedGameList"></div>
+        <h3 class="subheading">Pending Game Requests</h3>
+        <p class="panel-copy">Approved games leave this list and appear above. Each decision stays in game-request history.</p>
+        <div class="request-list" id="gameRequestList"></div>
+        <details class="history-panel">
+          <summary>Game Request History</summary>
+          <div class="request-list" id="gameHistoryList"></div>
+        </details>
       </section>
 
-      <section class="panel edit-panel" id="editPanel" hidden>
-        <p class="step">EDIT REQUEST</p>
-        <h2>Correct a library entry</h2>
-        <p class="panel-copy" id="editHelp"></p>
-        <form class="edit-form" id="editForm">
-          <label>
-            <span>Approved game</span>
-            <select id="editGameId" required></select>
-          </label>
-          <label>
-            <span>Correct guide name</span>
-            <input id="editGuide" maxlength="64" required>
-          </label>
+      <section class="panel" id="platformsSection" aria-labelledby="platformsHeading">
+        <p class="step">02 · PLATFORM MANAGEMENT</p>
+        <h2 id="platformsHeading">Platforms</h2>
+        <p class="panel-copy">Renaming a platform updates its games and guides. Move or remove those records before removing a platform.</p>
+        <h3 id="platformFormHeading">Add a platform</h3>
+        <form class="game-form" id="platformForm">
+          <label><span>Platform name</span><input id="platformName" maxlength="32" required></label>
           <div class="form-actions">
-            <button type="submit" id="saveEditButton">Save correction</button>
-            <button class="quiet-button" type="button" id="cancelEditButton">Cancel</button>
+            <button type="submit" id="savePlatformButton">Add platform</button>
+            <button type="button" class="quiet-button" id="cancelPlatformButton" hidden>Cancel</button>
           </div>
         </form>
-        <p class="message" id="editMessage" role="status" aria-live="polite"></p>
+        <p class="message" id="platformMessage" role="status" aria-live="polite"></p>
+        <div class="game-list" id="platformList"></div>
       </section>
 
-      <div class="dashboard-grid">
-        <section class="panel">
-          <p class="step">RECENT REQUESTS</p>
-          <h2>What the kids asked for</h2>
-          <p class="panel-copy">Removing a completed entry also permanently deletes its downloaded WebM file.</p>
-          <div class="request-list" id="requestList"></div>
-        </section>
+      <section class="panel" id="guidesSection" aria-labelledby="guidesHeading">
+        <p class="step">03 · GUIDE MANAGEMENT</p>
+        <h2 id="guidesHeading">Guides</h2>
+        <p class="panel-copy">Pre-Approve adds a checked YouTube guide to the pre-approved list. Check and approve also downloads it into the kids’ library.</p>
+        <h3 id="pinFormHeading">Add a pre-approved guide</h3>
+        <form class="pin-form" id="pinForm">
+          <label><span>Game · Platform</span><select id="gameId" required></select></label>
+          <label><span>Guide name</span><input id="guide" maxlength="64" placeholder="Chara or Sans Skeleton" required></label>
+          <label class="url-field"><span>YouTube video URL</span><input id="videoUrl" type="url" placeholder="https://youtu.be/VIDEO_ID" required></label>
+          <div class="form-actions">
+            <button type="submit" id="preapproveButton">Pre-Approve</button>
+            <button type="submit" id="approveButton" class="quiet-button">Check and approve</button>
+            <button type="button" id="cancelPinButton" class="quiet-button" hidden>Cancel</button>
+          </div>
+        </form>
+        <p class="message" id="approvalMessage" role="status" aria-live="polite"></p>
+        <h3 class="subheading">Pre-Approved Guides</h3>
+        <div class="pin-list" id="pinList"></div>
 
-        <section class="panel">
-          <p class="step">APPROVED VIDEOS</p>
-          <h2>Current manual pins</h2>
-          <div class="pin-list" id="pinList"></div>
-        </section>
-      </div>
-
-      <section class="panel">
-        <p class="step">AUDIT LOG</p>
-        <h2>Latest activity</h2>
-        <div class="audit-log" id="auditLog"></div>
+        <div class="edit-panel" id="editPanel" hidden>
+          <h3>Edit guide entry</h3>
+          <p class="panel-copy" id="editHelp"></p>
+          <form class="edit-form" id="editForm">
+            <label><span>Game · Platform</span><select id="editGameId" required></select></label>
+            <label><span>Correct guide name</span><input id="editGuide" maxlength="64" required></label>
+            <div class="form-actions">
+              <button type="submit" id="saveEditButton">Save changes</button>
+              <button class="quiet-button" type="button" id="cancelEditButton">Cancel</button>
+            </div>
+          </form>
+          <p class="message" id="editMessage" role="status" aria-live="polite"></p>
+        </div>
+        <h3 class="subheading">Guide Library &amp; Requests</h3>
+        <p class="panel-copy">Edit a guide’s name or choose Pre-Approve to save its URL. Removing a completed entry deletes its downloaded WebM; the request log stays below.</p>
+        <div class="request-list" id="requestList"></div>
+        <h3 class="subheading">Previous Requests</h3>
+        <p class="panel-copy">Guide requests and outcomes are kept here, including after approval or library cleanup. Latest first.</p>
+        <div class="audit-log" id="requestHistory"></div>
+        <button class="quiet-button" type="button" id="moreHistoryButton" hidden>Load older requests</button>
+        <p class="message" id="historyMessage" role="status" aria-live="polite"></p>
+        <details class="history-panel">
+          <summary>Latest Activity</summary>
+          <div class="audit-log" id="auditLog"></div>
+        </details>
       </section>
     </div>
   </main>

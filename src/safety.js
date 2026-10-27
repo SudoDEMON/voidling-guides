@@ -78,7 +78,9 @@ function validateGameName(value) {
 }
 
 function validatePlatform(value) {
-  return validateCatalogLabel(value, 'Platform', 2, 32);
+  const name = validateCatalogLabel(value, 'Platform', 2, 32);
+  if (name.includes(':')) throw new Error('Platform cannot contain a colon.');
+  return name;
 }
 
 function slug(value, fallback = 'guide') {

@@ -1,42 +1,17 @@
 'use strict';
 
-const loginPanel = document.querySelector('#loginPanel');
-const loginForm = document.querySelector('#loginForm');
-const loginHelp = document.querySelector('#loginHelp');
-const loginMessage = document.querySelector('#loginMessage');
-const passwordInput = document.querySelector('#password');
-const loginButton = document.querySelector('#loginButton');
-const dashboard = document.querySelector('#dashboard');
-const logoutButton = document.querySelector('#logoutButton');
-const pinForm = document.querySelector('#pinForm');
-const gameSelect = document.querySelector('#gameId');
-const guideInput = document.querySelector('#guide');
-const videoUrlInput = document.querySelector('#videoUrl');
-const approveButton = document.querySelector('#approveButton');
-const approvalMessage = document.querySelector('#approvalMessage');
-const gameForm = document.querySelector('#gameForm');
-const newPlatformInput = document.querySelector('#newPlatform');
-const newGameNameInput = document.querySelector('#newGameName');
-const addGameButton = document.querySelector('#addGameButton');
-const gameMessage = document.querySelector('#gameMessage');
-const editPanel = document.querySelector('#editPanel');
-const editForm = document.querySelector('#editForm');
-const editHelp = document.querySelector('#editHelp');
-const editGameSelect = document.querySelector('#editGameId');
-const editGuideInput = document.querySelector('#editGuide');
-const saveEditButton = document.querySelector('#saveEditButton');
-const cancelEditButton = document.querySelector('#cancelEditButton');
-const editMessage = document.querySelector('#editMessage');
-const requestList = document.querySelector('#requestList');
-const gameRequestList = document.querySelector('#gameRequestList');
-const approvedGameList = document.querySelector('#approvedGameList');
-const pinList = document.querySelector('#pinList');
-const auditLog = document.querySelector('#auditLog');
+const $ = selector => document.querySelector(selector);
+const busyStatuses = new Set(['queued', 'searching', 'checking', 'downloading']);
+let editingGameId = '';
+let editingPlatformId = '';
+let editingPin = null;
+let approvalRequestId = '';
 let editingRequestId = '';
+let historyOffset = null;
 
 function text(tag, className, value) {
   const node = document.createElement(tag);
-  if (className) node.className = className;
+  node.className = className;
   node.textContent = value;
   return node;
 }
@@ -46,20 +21,56 @@ function message(node, value, type = '') {
   node.className = `message ${type}`.trim();
 }
 
-async function removeThing({ button, prompt, url, body = {}, messageNode }) {
-  if (!window.confirm(prompt)) return;
-  button.disabled = true;
+function button(label, action, destructive = false) {
+  const node = text('button', `use-button${destructive ? ' destructive-button' : ''}`, label);
+  node.type = 'button';
+  node.addEventListener('click', () => action(node));
+  return node;
+}
+
+function actions(...buttons) {
+  const node = text('div', 'request-actions', '');
+  node.append(...buttons);
+  return node;
+}
+
+function card(name, meta, status = '') {
+  const node = text('article', 'request-item', '');
+  const top = text('div', 'request-top', '');
+  top.append(text('h4', '', name));
+  if (status) top.append(text('span', 'status', status.replaceAll('_', ' ')));
+  node.append(top, text('p', 'meta', meta));
+  return node;
+}
+
+function focusForm(form, field) {
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  field.focus({ preventScroll: true });
+}
+
+function fillSelect(select, records, label) {
+  const selected = select.value;
+  select.replaceChildren(...records.map(record => {
+    const option = text('option', '', label(record));
+    option.value = record.id;
+    return option;
+  }));
+  if ([...select.options].some(option => option.value === selected)) select.value = selected;
+}
+
+function guideLink(url) {
   try {
-    const state = await jsonFetch(url, {
-      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
-    });
-    message(messageNode, state.message, 'success');
-    renderDashboard(state);
-  } catch (error) {
-    if (error.status === 401) await loadState();
-    message(messageNode, error.message, 'error');
-    button.disabled = false;
-  }
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:' && ['www.youtube.com', 'youtube.com', 'youtu.be'].includes(parsed.hostname)
+      && !parsed.username && !parsed.password && !parsed.port) {
+      const link = text('a', 'guide-url', url);
+      link.href = parsed.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      return link;
+    }
+  } catch { /* A request may not have a video yet. */ }
+  return text('p', 'meta', 'URL: No video selected yet.');
 }
 
 async function jsonFetch(url, options = {}) {
@@ -73,330 +84,306 @@ async function jsonFetch(url, options = {}) {
   return body;
 }
 
-function renderGames(games) {
-  for (const select of [gameSelect, editGameSelect]) {
-    const selected = select.value;
-    select.replaceChildren();
-    for (const game of games) {
-      const option = document.createElement('option');
-      option.value = game.id;
-      option.textContent = `${game.platform}: ${game.name}`;
-      select.append(option);
-    }
-    if ([...select.options].some(option => option.value === selected)) select.value = selected;
-  }
-
-  const hasGames = games.length > 0;
-  approveButton.disabled = !hasGames;
-  approvedGameList.replaceChildren();
-  if (!hasGames) approvedGameList.append(text('p', 'empty', 'No approved games yet.'));
-  for (const game of games) {
-    const item = document.createElement('article');
-    item.className = 'game-item';
-    item.append(text('h3', '', game.name));
-    item.append(text('p', 'meta', `${game.platform} · ${game.pins.length} approved ${game.pins.length === 1 ? 'video' : 'videos'}`));
-    const remove = text('button', 'use-button destructive-button', 'Remove game');
-    remove.type = 'button';
-    remove.addEventListener('click', () => removeThing({
-      button: remove,
-      prompt: `Remove ${game.name} and all of its manually approved video links? Related library entries must be removed first.`,
-      url: `/dad/api/games/${encodeURIComponent(game.id)}`,
-      messageNode: gameMessage
-    }));
-    item.append(remove);
-    approvedGameList.append(item);
-  }
-
-  pinList.replaceChildren();
-  const pins = games.flatMap(game => game.pins.map(pin => ({ ...pin, game })));
-  if (pins.length === 0) pinList.append(text('p', 'empty', 'No manually approved videos yet.'));
-  for (const pin of pins) {
-    const item = document.createElement('article');
-    item.className = 'pin-item';
-    item.append(text('h3', '', pin.badge));
-    item.append(text('p', 'meta', `${pin.game.platform} · ${pin.game.name}`));
-    const link = text('a', '', pin.url);
-    link.href = pin.url;
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    item.append(link);
-    const edit = text('button', 'use-button', 'Edit approved video');
-    edit.type = 'button';
-    edit.addEventListener('click', () => {
-      gameSelect.value = pin.game.id;
-      guideInput.value = pin.badge;
-      videoUrlInput.value = pin.url;
-      guideInput.focus();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+async function mutate(url, method, body, messageNode, buttons, after = () => {}) {
+  buttons.forEach(node => { node.disabled = true; });
+  message(messageNode, 'Saving…');
+  try {
+    const state = await jsonFetch(url, {
+      method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
     });
-    const remove = text('button', 'use-button destructive-button', 'Remove approved video');
-    remove.type = 'button';
-    remove.addEventListener('click', () => removeThing({
-      button: remove,
-      prompt: `Remove the manually approved video for ${pin.badge}? Existing downloaded library copies are not removed.`,
-      url: '/dad/api/pins',
-      body: { gameId: pin.game.id, guide: pin.badge },
-      messageNode: approvalMessage
-    }));
-    const actions = document.createElement('div');
-    actions.className = 'request-actions';
-    actions.append(edit, remove);
-    item.append(actions);
-    pinList.append(item);
+    after(state);
+    renderDashboard(state);
+    message(messageNode, state.message, 'success');
+  } catch (error) {
+    if (error.status === 401) await loadState();
+    message(messageNode, error.message, 'error');
+  } finally {
+    buttons.forEach(node => { node.disabled = false; });
+  }
+}
+
+async function removeThing({ button, prompt, url, body = {}, messageNode }) {
+  if (!window.confirm(prompt)) return;
+  await mutate(url, 'DELETE', body, messageNode, [button]);
+}
+
+function resetGame() {
+  editingGameId = '';
+  $('#newGameName').value = '';
+  $('#gameFormHeading').textContent = 'Add a game';
+  $('#addGameButton').textContent = 'Add approved game';
+  $('#cancelGameButton').hidden = true;
+}
+
+function resetPlatform() {
+  editingPlatformId = '';
+  $('#platformForm').reset();
+  $('#platformFormHeading').textContent = 'Add a platform';
+  $('#savePlatformButton').textContent = 'Add platform';
+  $('#cancelPlatformButton').hidden = true;
+}
+
+function resetPin() {
+  editingPin = null;
+  approvalRequestId = '';
+  $('#guide').value = '';
+  $('#videoUrl').value = '';
+  $('#pinFormHeading').textContent = 'Add a pre-approved guide';
+  $('#preapproveButton').textContent = 'Pre-Approve';
+  $('#cancelPinButton').hidden = true;
+}
+
+function renderGames(games) {
+  for (const select of [$('#gameId'), $('#editGameId')]) {
+    fillSelect(select, games, game => `${game.platform}: ${game.name}`);
+  }
+  $('#approveButton').disabled = $('#preapproveButton').disabled = games.length === 0;
+  const list = $('#approvedGameList');
+  list.replaceChildren();
+  if (!games.length) list.append(text('p', 'empty', 'No approved games yet. Add a platform, then a game.'));
+  for (const game of games) {
+    const item = card(game.name, `${game.platform} · ${game.pins.length} pre-approved guides`);
+    item.append(actions(button('Edit', () => {
+      editingGameId = game.id;
+      $('#newGameName').value = game.name;
+      $('#newPlatform').value = game.platform;
+      $('#gameFormHeading').textContent = 'Edit game';
+      $('#addGameButton').textContent = 'Save changes';
+      $('#cancelGameButton').hidden = false;
+      message($('#gameMessage'), '');
+      focusForm($('#gameForm'), $('#newGameName'));
+    }), button('Remove', remove => removeThing({
+      button: remove, url: `/dad/api/games/${encodeURIComponent(game.id)}`, messageNode: $('#gameMessage'),
+      prompt: `Remove ${game.name} and its pre-approved guide links? Related library entries must be removed first.`
+    }), true)));
+    list.append(item);
+  }
+  const pins = $('#pinList');
+  pins.replaceChildren();
+  if (!games.some(game => game.pins.length)) pins.append(text('p', 'empty', 'No pre-approved guides yet.'));
+  for (const game of games) for (const pin of game.pins) {
+    const item = card(pin.badge, `${game.platform} · ${game.name}`);
+    item.append(guideLink(pin.url));
+    item.append(actions(button('Edit', () => {
+      resetPin();
+      editingPin = { id: pin.id, gameId: game.id };
+      $('#gameId').value = game.id;
+      $('#guide').value = pin.badge;
+      $('#videoUrl').value = pin.url;
+      $('#pinFormHeading').textContent = 'Edit pre-approved guide';
+      $('#preapproveButton').textContent = 'Save changes';
+      $('#cancelPinButton').hidden = false;
+      message($('#approvalMessage'), '');
+      focusForm($('#pinForm'), $('#guide'));
+    }), button('Remove', remove => removeThing({
+      button: remove, url: '/dad/api/pins', body: { gameId: game.id, guide: pin.badge },
+      prompt: `Remove ${pin.badge} from the pre-approved list? Downloaded library copies stay available.`,
+      messageNode: $('#approvalMessage')
+    }), true)));
+    pins.append(item);
+  }
+}
+
+function renderPlatforms(platforms) {
+  const select = $('#newPlatform');
+  fillSelect(select, platforms.map(platform => ({ id: platform.name, name: platform.name })), platform => platform.name);
+  $('#addGameButton').disabled = !platforms.length;
+  const list = $('#platformList');
+  list.replaceChildren();
+  if (!platforms.length) list.append(text('p', 'empty', 'No platforms yet. Add one to get started.'));
+  for (const platform of platforms) {
+    const item = card(platform.name, 'Platform');
+    item.append(actions(button('Edit', () => {
+      editingPlatformId = platform.id;
+      $('#platformName').value = platform.name;
+      $('#platformFormHeading').textContent = 'Edit platform';
+      $('#savePlatformButton').textContent = 'Save changes';
+      $('#cancelPlatformButton').hidden = false;
+      message($('#platformMessage'), '');
+      focusForm($('#platformForm'), $('#platformName'));
+    }), button('Remove', remove => removeThing({
+      button: remove, url: `/dad/api/platforms/${encodeURIComponent(platform.id)}`,
+      prompt: `Remove ${platform.name}? Platforms in use cannot be removed.`, messageNode: $('#platformMessage')
+    }), true)));
+    list.append(item);
   }
 }
 
 function renderRequests(requests) {
-  requestList.replaceChildren();
-  if (requests.length === 0) requestList.append(text('p', 'empty', 'No requests yet.'));
+  const list = $('#requestList');
+  list.replaceChildren();
+  if (!requests.length) list.append(text('p', 'empty', 'No current library entries. Previous requests remain in the log below.'));
   for (const request of requests) {
-    const item = document.createElement('article');
-    item.className = 'request-item';
-    const top = document.createElement('div');
-    top.className = 'request-top';
-    top.append(text('h3', '', request.suggestedBadge || request.badge));
-    top.append(text('span', 'status', request.status.replaceAll('_', ' ')));
-    item.append(top);
-    item.append(text('p', 'meta', `${request.platform} · ${request.game}`));
-    item.append(text('p', 'meta', `${new Date(request.createdAt).toLocaleString()} · ${request.requestClient || 'unknown client'}`));
+    const item = card(request.badge, `${request.platform} · ${request.game}`, request.status);
+    item.append(text('p', 'meta', new Date(request.createdAt).toLocaleString()), guideLink(request.url));
+    if (request.suggestedBadge) item.append(text('p', 'meta', `Suggested name: ${request.suggestedBadge}`));
     if (request.sourceTitle) item.append(text('p', 'meta', request.sourceTitle));
-    const actions = document.createElement('div');
-    actions.className = 'request-actions';
-    const use = text('button', 'use-button', 'Use in approval form');
-    use.type = 'button';
-    use.addEventListener('click', () => {
-      gameSelect.value = request.gameId;
-      guideInput.value = request.suggestedBadge || request.badge;
-      videoUrlInput.focus();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    const preapprove = button('Pre-Approve', () => {
+      resetPin();
+      approvalRequestId = request.id;
+      $('#gameId').value = request.gameId;
+      $('#guide').value = request.suggestedBadge || request.badge;
+      $('#videoUrl').value = request.url;
+      $('#cancelPinButton').hidden = false;
+      message($('#approvalMessage'), 'Review the name and URL, then choose Pre-Approve to save this guide.');
+      focusForm($('#pinForm'), $('#videoUrl'));
     });
-    const edit = text('button', 'use-button', 'Edit request');
-    edit.type = 'button';
-    const busy = ['queued', 'searching', 'checking', 'downloading'].includes(request.status);
-    edit.disabled = busy;
-    if (busy) edit.title = 'Wait for the current guide work to finish.';
-    edit.addEventListener('click', () => {
+    const edit = button('Edit', () => {
       editingRequestId = request.id;
-      editGameSelect.value = request.gameId;
-      editGuideInput.value = request.suggestedBadge || request.badge;
-      editHelp.textContent = request.status === 'complete'
-        ? 'This renames the existing playable library card.'
-        : 'Saving retries this request under the corrected game and guide name.';
-      message(editMessage, '');
-      editPanel.hidden = false;
-      editPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      $('#editGameId').value = request.gameId;
+      $('#editGuide').value = request.suggestedBadge || request.badge;
+      $('#editHelp').textContent = request.status === 'complete'
+        ? 'Save changes to rename this playable library entry.'
+        : 'Save changes to retry this request with the corrected game and guide name.';
+      $('#editPanel').hidden = false;
+      message($('#editMessage'), '');
+      focusForm($('#editForm'), $('#editGuide'));
     });
-    const remove = text('button', 'use-button destructive-button', request.status === 'complete' ? 'Remove entry & video' : 'Remove entry');
-    remove.type = 'button';
-    remove.disabled = busy;
-    if (busy) remove.title = 'Wait for the current guide work to finish.';
-    remove.addEventListener('click', () => removeThing({
-      button: remove,
-      prompt: request.status === 'complete'
-        ? `Remove ${request.badge} from the library and permanently delete its downloaded video file?`
-        : `Remove the ${request.badge} request from the library?`,
-      url: `/dad/api/requests/${encodeURIComponent(request.id)}`,
-      messageNode: approvalMessage
-    }));
-    actions.append(use, edit, remove);
-    item.append(actions);
-    requestList.append(item);
+    const remove = button('Remove', node => removeThing({
+      button: node, url: `/dad/api/requests/${encodeURIComponent(request.id)}`, messageNode: $('#approvalMessage'),
+      prompt: request.status === 'complete' ? `Remove ${request.badge} and permanently delete its downloaded WebM? The request log stays.`
+        : `Remove ${request.badge} from the library? The request log stays.`
+    }), true);
+    for (const action of [preapprove, edit, remove]) {
+      action.disabled = busyStatuses.has(request.status);
+      if (action.disabled) action.title = 'Wait for the current guide work to finish.';
+    }
+    item.append(actions(preapprove, edit, remove));
+    list.append(item);
   }
 }
 
 function renderGameRequests(requests) {
-  gameRequestList.replaceChildren();
-  if (requests.length === 0) gameRequestList.append(text('p', 'empty', 'No game requests yet.'));
+  const pending = $('#gameRequestList');
+  const history = $('#gameHistoryList');
+  pending.replaceChildren();
+  history.replaceChildren();
+  if (!requests.some(request => request.status === 'pending')) pending.append(text('p', 'empty', 'No games waiting for approval.'));
+  if (!requests.some(request => request.status !== 'pending')) history.append(text('p', 'empty', 'No reviewed game requests yet.'));
   for (const request of requests) {
-    const item = document.createElement('article');
-    item.className = 'request-item';
-    const top = document.createElement('div');
-    top.className = 'request-top';
-    top.append(text('h3', '', request.name));
-    top.append(text('span', 'status', request.status));
-    item.append(top);
-    item.append(text('p', 'meta', `${request.platform} · ${new Date(request.createdAt).toLocaleString()} · ${request.requestClient || 'unknown client'}`));
-    const actions = document.createElement('div');
-    actions.className = 'request-actions';
+    const item = card(request.name, `${request.platform} · ${new Date(request.createdAt).toLocaleString()}`, request.status);
     if (request.status === 'pending') {
-      const approve = text('button', 'use-button', 'Approve game');
-      const decline = text('button', 'use-button decline-request', 'Decline');
-      approve.type = 'button';
-      decline.type = 'button';
-      const buttons = [approve, decline];
-      const decide = async decision => {
-        for (const button of buttons) button.disabled = true;
-        try {
-          const state = await jsonFetch(`/dad/api/game-requests/${encodeURIComponent(request.id)}`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ decision })
-          });
-          message(gameMessage, state.message, decision === 'approve' ? 'success' : '');
-          renderGames(state.games || []);
-          renderRequests(state.requests || []);
-          renderGameRequests(state.gameRequests || []);
-          renderLog(state.log || []);
-        } catch (error) {
-          if (error.status === 401) await loadState();
-          message(gameMessage, error.message, 'error');
-          for (const button of buttons) button.disabled = false;
-        }
-      };
-      approve.addEventListener('click', () => decide('approve'));
-      decline.addEventListener('click', () => decide('decline'));
-      actions.append(approve, decline);
-    }
-    const remove = text('button', 'use-button destructive-button', 'Remove request');
-    remove.type = 'button';
-    remove.addEventListener('click', () => removeThing({
-      button: remove,
-      prompt: `Remove the ${request.name} game request from Dad’s review history?`,
-      url: `/dad/api/game-requests/${encodeURIComponent(request.id)}`,
-      messageNode: gameMessage
-    }));
-    actions.append(remove);
-    item.append(actions);
-    gameRequestList.append(item);
+      const approve = button('Approve game', () => decide('approve'));
+      const decline = button('Decline', () => decide('decline'));
+      const decide = decision => mutate(`/dad/api/game-requests/${encodeURIComponent(request.id)}`, 'POST',
+        { decision }, $('#gameMessage'), [approve, decline]);
+      item.append(actions(approve, decline));
+    } else if (request.resolvedAt) item.append(text('p', 'meta', `Reviewed ${new Date(request.resolvedAt).toLocaleString()}`));
+    item.append(button('Remove request', remove => removeThing({
+      button: remove, url: `/dad/api/game-requests/${encodeURIComponent(request.id)}`,
+      prompt: `Remove the ${request.name} game request from review history? Its audit record stays.`, messageNode: $('#gameMessage')
+    }), true));
+    (request.status === 'pending' ? pending : history).append(item);
   }
 }
 
-function renderLog(entries) {
-  auditLog.replaceChildren();
-  if (entries.length === 0) auditLog.append(text('p', 'empty', 'The audit log is empty.'));
-  for (const entry of entries) auditLog.append(text('div', 'audit-entry', entry));
+function renderLog(entries, list) {
+  list.replaceChildren();
+  if (!entries.length) list.append(text('p', 'empty', 'No recorded activity yet.'));
+  for (const entry of entries) list.append(text('div', 'audit-entry', entry));
+}
+
+function renderHistory(history, append = false) {
+  if (!append) renderLog(history.entries, $('#requestHistory'));
+  else for (const entry of history.entries) $('#requestHistory').append(text('div', 'audit-entry', entry));
+  historyOffset = history.nextOffset;
+  $('#moreHistoryButton').hidden = historyOffset === null;
 }
 
 function renderDashboard(state) {
+  renderPlatforms(state.platforms || []);
   renderGames(state.games || []);
   renderRequests(state.requests || []);
   renderGameRequests(state.gameRequests || []);
-  renderLog(state.log || []);
-}
-
-function renderState(state) {
-  if (!state.authenticated) {
-    dashboard.hidden = true;
-    loginPanel.hidden = false;
-    loginHelp.textContent = state.configured
-      ? 'Sign in to view requests and approve videos.'
-      : 'No password is configured. Run “npm run set-password” in the project terminal first.';
-    loginButton.disabled = !state.configured;
-    return;
-  }
-  loginPanel.hidden = true;
-  dashboard.hidden = false;
-  renderDashboard(state);
+  renderHistory(state.history || { entries: [], nextOffset: null });
+  renderLog(state.log || [], $('#auditLog'));
 }
 
 async function loadState() {
   const state = await jsonFetch('/dad/api/state');
-  renderState(state);
+  $('#dashboard').hidden = !state.authenticated;
+  $('#loginPanel').hidden = state.authenticated;
+  if (state.authenticated) renderDashboard(state);
+  else {
+    $('#loginHelp').textContent = state.configured ? 'Sign in to view requests and approve videos.'
+      : 'No password is configured. Run “npm run set-password” in the project terminal first.';
+    $('#loginButton').disabled = !state.configured;
+  }
 }
 
-loginForm.addEventListener('submit', async event => {
+$('#loginForm').addEventListener('submit', async event => {
   event.preventDefault();
-  loginButton.disabled = true;
-  message(loginMessage, 'Checking password...');
+  $('#loginButton').disabled = true;
   try {
-    await jsonFetch('/dad/api/login', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password: passwordInput.value })
-    });
-    passwordInput.value = '';
-    message(loginMessage, 'Unlocked.', 'success');
+    await jsonFetch('/dad/api/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: $('#password').value }) });
+    $('#password').value = '';
+    message($('#loginMessage'), '');
     await loadState();
-  } catch (error) {
-    message(loginMessage, error.message, 'error');
-  } finally {
-    loginButton.disabled = false;
-  }
+  } catch (error) { message($('#loginMessage'), error.message, 'error'); }
+  finally { $('#loginButton').disabled = false; }
 });
 
-pinForm.addEventListener('submit', async event => {
+$('#gameForm').addEventListener('submit', event => {
   event.preventDefault();
-  approveButton.disabled = true;
-  message(approvalMessage, 'Checking the video before approval...');
-  try {
-    const state = await jsonFetch('/dad/api/pins', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ gameId: gameSelect.value, guide: guideInput.value, url: videoUrlInput.value })
-    });
-    guideInput.value = '';
-    videoUrlInput.value = '';
-    message(approvalMessage, state.message, 'success');
-    renderGames(state.games || []);
-    renderRequests(state.requests || []);
-    renderGameRequests(state.gameRequests || []);
-    renderLog(state.log || []);
-  } catch (error) {
-    if (error.status === 401) await loadState();
-    message(approvalMessage, error.message, 'error');
-  } finally {
-    approveButton.disabled = false;
-  }
+  mutate(editingGameId ? `/dad/api/games/${encodeURIComponent(editingGameId)}` : '/dad/api/games',
+    editingGameId ? 'PATCH' : 'POST', { platform: $('#newPlatform').value, name: $('#newGameName').value },
+    $('#gameMessage'), [$('#addGameButton'), $('#cancelGameButton')], resetGame);
 });
+$('#cancelGameButton').addEventListener('click', () => { resetGame(); message($('#gameMessage'), 'Edit cancelled.'); });
 
-gameForm.addEventListener('submit', async event => {
+$('#platformForm').addEventListener('submit', event => {
   event.preventDefault();
-  addGameButton.disabled = true;
-  message(gameMessage, 'Adding the approved game...');
-  try {
-    const state = await jsonFetch('/dad/api/games', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ platform: newPlatformInput.value, name: newGameNameInput.value })
-    });
-    newGameNameInput.value = '';
-    message(gameMessage, state.message, 'success');
-    renderGames(state.games || []);
-    gameSelect.value = state.game.id;
-    renderRequests(state.requests || []);
-    renderGameRequests(state.gameRequests || []);
-    renderLog(state.log || []);
-  } catch (error) {
-    if (error.status === 401) await loadState();
-    message(gameMessage, error.message, 'error');
-  } finally {
-    addGameButton.disabled = false;
-  }
+  mutate(editingPlatformId ? `/dad/api/platforms/${encodeURIComponent(editingPlatformId)}` : '/dad/api/platforms',
+    editingPlatformId ? 'PATCH' : 'POST', { name: $('#platformName').value }, $('#platformMessage'),
+    [$('#savePlatformButton'), $('#cancelPlatformButton')], resetPlatform);
 });
+$('#cancelPlatformButton').addEventListener('click', () => { resetPlatform(); message($('#platformMessage'), 'Edit cancelled.'); });
 
-editForm.addEventListener('submit', async event => {
+$('#pinForm').addEventListener('submit', event => {
   event.preventDefault();
-  if (!editingRequestId) return;
-  saveEditButton.disabled = true;
-  message(editMessage, 'Saving the correction...');
-  try {
-    const state = await jsonFetch(`/dad/api/requests/${encodeURIComponent(editingRequestId)}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ gameId: editGameSelect.value, guide: editGuideInput.value })
-    });
-    message(approvalMessage, state.message, 'success');
-    editingRequestId = '';
-    editPanel.hidden = true;
-    renderGames(state.games || []);
-    renderRequests(state.requests || []);
-    renderGameRequests(state.gameRequests || []);
-    renderLog(state.log || []);
-  } catch (error) {
-    if (error.status === 401) await loadState();
-    message(editMessage, error.message, 'error');
-  } finally {
-    saveEditButton.disabled = false;
-  }
+  mutate('/dad/api/pins', editingPin ? 'PATCH' : 'POST', {
+    gameId: $('#gameId').value, guide: $('#guide').value, url: $('#videoUrl').value,
+    download: event.submitter === $('#approveButton'),
+    ...(editingPin ? { previousGameId: editingPin.gameId, pinId: editingPin.id } : {}),
+    ...(approvalRequestId ? { requestId: approvalRequestId } : {})
+  }, $('#approvalMessage'), [$('#preapproveButton'), $('#approveButton'), $('#cancelPinButton')], resetPin);
 });
+$('#cancelPinButton').addEventListener('click', () => { resetPin(); message($('#approvalMessage'), 'Edit cancelled.'); });
 
-cancelEditButton.addEventListener('click', () => {
+$('#editForm').addEventListener('submit', event => {
+  event.preventDefault();
+  mutate(`/dad/api/requests/${encodeURIComponent(editingRequestId)}`, 'POST',
+    { gameId: $('#editGameId').value, guide: $('#editGuide').value }, $('#editMessage'),
+    [$('#saveEditButton'), $('#cancelEditButton')], state => {
+      editingRequestId = '';
+      $('#editPanel').hidden = true;
+      message($('#approvalMessage'), state.message, 'success');
+    });
+});
+$('#cancelEditButton').addEventListener('click', () => {
   editingRequestId = '';
-  editPanel.hidden = true;
-  message(editMessage, '');
+  $('#editPanel').hidden = true;
+  message($('#approvalMessage'), 'Edit cancelled.');
 });
-
-logoutButton.addEventListener('click', async () => {
-  await jsonFetch('/dad/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-  await loadState();
+$('#moreHistoryButton').addEventListener('click', async () => {
+  $('#moreHistoryButton').disabled = true;
+  try {
+    const history = await jsonFetch(`/dad/api/history?offset=${historyOffset}`);
+    renderHistory(history, true);
+    message($('#historyMessage'), 'Older requests loaded.');
+  } catch (error) { message($('#historyMessage'), error.message, 'error'); }
+  finally { $('#moreHistoryButton').disabled = false; }
 });
-
+$('#logoutButton').addEventListener('click', async () => {
+  try {
+    await jsonFetch('/dad/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    resetGame(); resetPlatform(); resetPin();
+    $('#editPanel').hidden = true;
+    await loadState();
+  } catch (error) { message($('#gameMessage'), error.message, 'error'); }
+});
 loadState().catch(error => {
-  loginPanel.hidden = false;
-  message(loginMessage, error.message, 'error');
+  $('#loginPanel').hidden = false;
+  message($('#loginMessage'), error.message, 'error');
 });

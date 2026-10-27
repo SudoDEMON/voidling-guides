@@ -84,19 +84,36 @@ by the LAN client list, for example:
 http://192.168.1.50:3002/dad
 ```
 
-The page lets Dad add approved games, review and correct kid requests, inspect
-the append-only audit log, and add or replace a guide's approved YouTube video.
-It validates video URLs, metadata, captions, and public availability before
-updating the local catalog. After approval succeeds, the app immediately queues
-the video for download and serves it from the kids' library when conversion
-finishes; the child does not need to submit a second request.
+Dad management has three sections:
 
-Dad can also remove manually approved video links, game requests, guide/library
-entries, and approved games. Every removal asks for confirmation and is written
-to the append-only audit log. Removing a completed library entry permanently
-deletes its managed WebM file; removing only an approved video link leaves any
-already downloaded library copy alone. A game cannot be removed until its
-related library entries have been removed, which prevents orphaned videos.
+- **Games**: add, edit, or remove approved game records; review pending game
+  requests; and inspect game-request history. Approving a request removes it
+  from the pending list and keeps its original name, date, and decision in history.
+- **Platforms**: add, edit, or remove platform records, including platforms with
+  no games yet. Rename updates related games and guide display labels. Removal
+  is blocked while games or library entries use the platform.
+- **Guides**: manage guide names, games/platforms, and YouTube URLs, review current
+  library entries, and browse **Previous Requests**, the retained guide request
+  and outcome log. Older log entries can be loaded without relying on the
+  current library cards. Latest Activity also includes administrative events.
+
+**Pre-Approve** checks a YouTube URL and saves the guide in the pre-approved
+list without starting a download. A library entry's Pre-Approve action fills
+that form for review. **Check and approve** also queues the video for immediate
+WebM download; the child does not need to request it again. Both actions retain
+URL, metadata, captions, and public-availability validation.
+
+Edit forms have explicit Save changes and Cancel controls with success/error
+feedback. Game, platform, and pre-approved guide edits preserve record IDs;
+related library labels update without moving or deleting existing video files.
+A guide name correction also updates a matching pre-approved entry. Active
+search/download jobs must finish before their records can be edited or removed.
+
+Every removal asks for confirmation and is written to the append-only audit
+log. Removing a completed library entry permanently deletes its managed WebM;
+removing only a pre-approved link leaves the downloaded copy alone. Removing a
+game also removes its pins, but is blocked until related library entries have
+been removed. Neither approval nor library removal erases Previous Requests.
 
 If a game is missing from the kids' dropdown, the child can submit its platform
 and full game name for Dad to review. This does not search YouTube or download
@@ -172,6 +189,12 @@ approves a game and adds it to the dropdown:
 ```markdown
 ## Roblox: Example Game
 ```
+
+Dad edits store stable game and guide IDs and standalone platform records in
+HTML comments inside this Markdown catalog. Keep those comments when editing
+by hand. Existing catalogs load without a migration; legacy IDs are preserved
+when the first name edit writes the corresponding record. Use the Dad forms
+for renames so related library display labels stay synchronized.
 
 An optional Markdown link pins a Dad-approved video for a guide. Pinned videos
 skip Antigravity selection but still receive YouTube metadata and file checks:
@@ -252,7 +275,8 @@ canonical YouTube URL, and the Antigravity selection response. Example:
 Completed videos and their library cards are deleted seven days after
 completion. Failed cards are deleted after 24 hours. The append-only request log
 is retained and is not affected by cleanup. Pending game requests remain until
-Dad reviews them; approved or declined requests are removed after 30 days. There
+Dad reviews them; reviewed game requests remain in game-request history until
+Dad explicitly removes them. The audit record remains even after that removal. There
 is no duration or total-size cap.
 
 ## VOiDling mascot
@@ -271,6 +295,22 @@ npm test
 npm run doctor
 node --check server.js
 ```
+
+There is no compilation/build step or runtime npm dependency. `npm test`
+includes temporary-file HTTP tests for Dad authentication, mutations,
+dependency checks, stable identity, and approval/history retention.
+
+For optional desktop/mobile browser checks, reuse an installed Playwright or
+Playwright Core package with its Chromium browser:
+
+```bash
+VOIDLING_PLAYWRIGHT_PATH=/absolute/path/to/playwright-core node scripts/check-dad-ui.js
+```
+
+The browser gate serves the actual Dad UI and controller against a disposable
+fixture. It stubs video metadata/download work, checks save/cancel, visible
+errors, history, persistence, and layout overflow, and prints screenshot paths.
+It never reads or writes production data.
 
 GitHub Actions run the Node test suite and a full-history Gitleaks scan on pushes
 and pull requests. Keep all machine-specific settings, approved games, request

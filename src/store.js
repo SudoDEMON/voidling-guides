@@ -5,7 +5,6 @@ const path = require('path');
 
 const COMPLETE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const FAILED_TTL_MS = 24 * 60 * 60 * 1000;
-const RESOLVED_GAME_REQUEST_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function defaultState() {
   return { version: 1, guides: [], gameRequests: [] };
@@ -121,15 +120,9 @@ class LibraryStore {
     if (removed.length > 0) {
       this.state.guides = kept;
     }
-    const gameRequestCount = this.state.gameRequests.length;
-    this.state.gameRequests = this.state.gameRequests.filter(request => {
-      if (request.status === 'pending') return true;
-      const resolved = Date.parse(request.resolvedAt || 0);
-      return !Number.isFinite(resolved) || now - resolved < RESOLVED_GAME_REQUEST_TTL_MS;
-    });
-    if (removed.length > 0 || this.state.gameRequests.length !== gameRequestCount) this.save();
+    if (removed.length > 0) this.save();
     return removed;
   }
 }
 
-module.exports = { COMPLETE_TTL_MS, FAILED_TTL_MS, RESOLVED_GAME_REQUEST_TTL_MS, LibraryStore, defaultState };
+module.exports = { COMPLETE_TTL_MS, FAILED_TTL_MS, LibraryStore, defaultState };
