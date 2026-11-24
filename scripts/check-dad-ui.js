@@ -1,13 +1,14 @@
-'use strict';
-
 // Optional browser gate. Reuses an installed Playwright/Playwright Core module;
 // all writes and mocked video checks are confined to the disposable fixture.
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import { dadFixture } from '../test-support/dad-fixture.js';
+
+const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.VOIDLING_PLAYWRIGHT_PATH || 'playwright');
-const { dadFixture } = require('../test-support/dad-fixture');
 
 async function main() {
   const screenshots = fs.mkdtempSync(path.join(os.tmpdir(), 'voidling-dad-ui-'));
@@ -18,11 +19,19 @@ async function main() {
       const page = await browser.newPage({ viewport, reducedMotion: 'reduce' });
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      page.on('dialog', dialog => dialog.accept());
+      page.on('console', msg => {
+        if (msg.type() === 'error' && !/status of 40[09]/.test(msg.text())) errors.push(msg.text());
+      });
       const click = (selector, label) => page.locator(selector).getByRole('button', { name: label, exact: true }).click();
       const item = (selector, label) => page.locator(`${selector} article`).filter({ has: page.getByRole('heading', { name: label, exact: true }) });
       async function message(selector, expected) {
-        await page.waitForFunction(({ selector, expected }) => document.querySelector(selector)?.textContent.includes(expected), { selector, expected });
+        await page.waitForFunction(({ selector: sel, expected: exp }) => document.querySelector(sel)?.textContent.includes(exp), { selector, expected });
+      }
+      async function removeWithDialog(trigger) {
+        await trigger.click();
+        await page.locator('#confirmDialog').waitFor({ state: 'visible' });
+        await page.locator('#confirmDialogAccept').click();
+        await page.locator('#confirmDialog').waitFor({ state: 'hidden' });
       }
       try {
         await page.goto(`${fixture.origin}/dad`);
@@ -54,12 +63,12 @@ async function main() {
         await click('#platformForm', 'Save changes');
         await message('#platformMessage', 'Saved platform ROBLOX');
         assert.match(await page.locator('#requestList').innerText(), /ROBLOX/);
-        await item('#platformList', 'ROBLOX').getByRole('button', { name: 'Remove', exact: true }).click();
+        await removeWithDialog(item('#platformList', 'ROBLOX').getByRole('button', { name: 'Remove', exact: true }));
         await message('#platformMessage', 'Move or remove');
         await page.locator('#platformName').fill('Desktop');
         await click('#platformForm', 'Add platform');
         await message('#platformMessage', 'Saved platform Desktop');
-        await item('#platformList', 'Desktop').getByRole('button', { name: 'Remove', exact: true }).click();
+        await removeWithDialog(item('#platformList', 'Desktop').getByRole('button', { name: 'Remove', exact: true }));
         await message('#platformMessage', 'Removed platform Desktop');
 
         await item('#pinList', 'Old Guide').getByRole('button', { name: 'Edit', exact: true }).click();
@@ -115,7 +124,7 @@ async function main() {
         await page.screenshot({ path: path.join(screenshots, `${name}.png`), fullPage: true });
         await page.locator('#guidesSection').screenshot({ path: path.join(screenshots, `${name}-guides.png`) });
 
-        await item('#requestList', 'Corrected Entry').getByRole('button', { name: 'Remove', exact: true }).click();
+        await removeWithDialog(item('#requestList', 'Corrected Entry').getByRole('button', { name: 'Remove', exact: true }));
         await message('#approvalMessage', 'Removed Corrected Entry');
         assert.equal(await page.locator('#requestList article').count(), 0);
         assert.match(await page.locator('#requestHistory').innerText(), /REQUESTED - Test Gmae - Old Guide/);
@@ -127,12 +136,20 @@ async function main() {
         await page.locator('#loginPanel').waitFor({ state: 'visible' });
         assert.deepEqual(errors, []);
         assert.deepEqual(fixture.errors, []);
-        console.log(`PASS ${name}: three sections, add/edit/save/cancel/error feedback, approval/history, pre-approval/download, reload, removal, no overflow or page errors`);
-      } finally { await page.close(); await fixture.close(); }
+        console.log(`PASS ${name}: three sections, add/edit/save/cancel/error feedback, approval/history, pre-approval/download, reload, removal dialog, no overflow or page errors`);
+      } finally {
+        await page.close();
+        await fixture.close();
+      }
     }
     console.log(`Screenshots: ${screenshots}`);
     console.log('Video metadata and downloads were stubbed; production data was not used.');
-  } finally { await browser.close(); }
+  } finally {
+    await browser.close();
+  }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

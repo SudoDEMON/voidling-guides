@@ -1,19 +1,23 @@
-'use strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import { HttpError, writeFileAtomic } from './fs-utils.js';
+import { normalizeKey, stableId, validateGameName, validateGuideName, validatePlatform } from './safety.js';
+import { canonicalYouTubeUrl, extractYouTubeId } from './youtube.js';
 
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { normalizeKey, stableId, validateGameName, validateGuideName, validatePlatform } = require('./safety');
-
+const HEADING = /^##\s+([^:\n]+):\s*(.+?)\s*$/;
 const GAME_ID = /^<!-- game-id: ([a-z0-9-]{3,160}) -->$/i;
 const PLATFORM = /^<!-- platform: (.+) -->$/;
 const PIN = /^\s*-\s*\[([^\]]+)]\((https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[^)\s]+)\)(?:\s+<!-- guide-id: ([a-z0-9-]{3,160}) -->)?\s*$/i;
 
-function parseCatalog(markdown) {
+export function gameKey(platform, name) {
+  return normalizeKey(`${platform}:${name}`);
+}
+
+export function parseCatalog(markdown) {
   const games = [];
   let current = null;
   for (const rawLine of String(markdown || '').split(/\r?\n/)) {
-    const heading = rawLine.match(/^##\s+([^:\n]+):\s*(.+?)\s*$/);
+    const heading = rawLine.match(HEADING);
     if (heading) {
       const platform = heading[1].trim();
       const name = heading[2].trim();
@@ -26,7 +30,7 @@ function parseCatalog(markdown) {
     const link = rawLine.match(PIN);
     if (current && link) {
       current.pinned[normalizeKey(link[1])] = {
-        id: link[3] || null, badge: link[1].trim(), url: link[2].trim()
+        id: link[3] || null, guide: link[1].trim(), url: link[2].trim()
       };
     }
   }
@@ -34,33 +38,36 @@ function parseCatalog(markdown) {
   const labels = new Set();
   for (const game of games) {
     const label = gameKey(game.platform, game.name);
-    if (ids.has(game.id) || labels.has(label)) throw new Error(`Duplicate approved game: ${game.platform}: ${game.name}`);
+    if (ids.has(game.id) || labels.has(label)) {
+      throw new HttpError(400, `Duplicate approved game: ${game.platform}: ${game.name}`);
+    }
     ids.add(game.id);
     labels.add(label);
-    for (const pin of Object.values(game.pinned)) pin.id ||= stableId(`${game.id}:${pin.badge}`);
+    for (const pin of Object.values(game.pinned)) pin.id ||= stableId(`${game.id}:${pin.guide}`);
   }
   return games;
 }
 
-function gameKey(platform, name) {
-  return normalizeKey(`${platform}:${name}`);
-}
-
-function parsePlatforms(markdown) {
+function parsePlatforms(markdown, parsedGames = null) {
   const platforms = [];
-  for (const line of markdown.split(/\r?\n/)) {
+  for (const line of String(markdown || '').split(/\r?\n/)) {
     const match = line.match(PLATFORM);
     if (!match) continue;
-    const platform = JSON.parse(match[1]);
-    if (!/^[a-z0-9-]{3,160}$/i.test(platform.id) || validatePlatform(platform.name) !== platform.name) {
-      throw new Error('Invalid platform record in the approved catalog.');
+    let platform;
+    try {
+      platform = JSON.parse(match[1]);
+    } catch {
+      throw new HttpError(400, 'Invalid platform record in the approved catalog.');
+    }
+    if (!platform || !/^[a-z0-9-]{3,160}$/i.test(platform.id || '') || validatePlatform(platform.name) !== platform.name) {
+      throw new HttpError(400, 'Invalid platform record in the approved catalog.');
     }
     if (platforms.some(item => item.id === platform.id || normalizeKey(item.name) === normalizeKey(platform.name))) {
-      throw new Error('Duplicate platform in the approved catalog.');
+      throw new HttpError(400, 'Duplicate platform in the approved catalog.');
     }
     platforms.push(platform);
   }
-  for (const game of parseCatalog(markdown)) {
+  for (const game of parsedGames || parseCatalog(markdown)) {
     if (!platforms.some(item => normalizeKey(item.name) === normalizeKey(game.platform))) {
       platforms.push({ id: stableId(`platform:${game.platform}`), name: game.platform });
     }
@@ -68,30 +75,45 @@ function parsePlatforms(markdown) {
   return platforms;
 }
 
-function loadCatalog(filePath) { return parseCatalog(fs.readFileSync(filePath, 'utf8')); }
-function loadPlatforms(filePath) { return parsePlatforms(fs.readFileSync(filePath, 'utf8')); }
-function publicGames(games) { return games.map(({ id, platform, name }) => ({ id, platform, name })); }
+export function loadCatalog(filePath) {
+  return parseCatalog(fs.readFileSync(filePath, 'utf8'));
+}
+
+export function loadPlatforms(filePath) {
+  return parsePlatforms(fs.readFileSync(filePath, 'utf8'));
+}
+
+export function publicGames(games) {
+  return games.map(({ id, platform, name }) => ({ id, platform, name }));
+}
 
 function writeCatalog(filePath, markdown) {
-  // Validate the entire result before the atomic replacement; retain free-form notes.
-  parseCatalog(markdown);
-  parsePlatforms(markdown);
-  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp`);
-  fs.writeFileSync(temporary, `${String(markdown).replace(/\n+$/, '')}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, filePath);
+  // Validate the entire result before atomic replacement; retain free-form notes.
+  const games = parseCatalog(markdown);
+  parsePlatforms(markdown, games);
+  writeFileAtomic(filePath, `${String(markdown).replace(/\n+$/, '')}\n`, { mode: 0o600 });
 }
 
 function withPlatforms(markdown, platforms) {
   const body = markdown.split(/\r?\n/).filter(line => !PLATFORM.test(line)).join('\n');
-  return `${platforms.map(platform => `<!-- platform: ${JSON.stringify(platform)} -->`).join('\n')}\n${body}`;
+  const header = platforms.map(platform => `<!-- platform: ${JSON.stringify(platform)} -->`).join('\n');
+  return header ? `${header}\n${body}` : body;
 }
 
 function gameSection(lines, game) {
-  const start = lines.findIndex(line => line.trim() === `## ${game.platform}: ${game.name}`);
-  if (start < 0) throw new Error('The approved game heading could not be found.');
+  const targetKey = gameKey(game.platform, game.name);
+  const start = lines.findIndex(line => {
+    const match = line.match(HEADING);
+    return match && gameKey(match[1].trim(), match[2].trim()) === targetKey;
+  });
+  if (start < 0) throw new HttpError(404, 'The approved game heading could not be found.');
   let end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
   if (end < 0) end = lines.length;
   return { start, end };
+}
+
+function pinLine(pin) {
+  return `- [${pin.guide}](${pin.url}) <!-- guide-id: ${pin.id} -->`;
 }
 
 function replaceGame(lines, game, platform, name) {
@@ -107,16 +129,17 @@ function replaceGame(lines, game, platform, name) {
   else lines.splice(start + 1, 0, `<!-- game-id: ${game.id} -->`);
 }
 
-function addApprovedGame(filePath, platformValue, nameValue) {
+export function addApprovedGame(filePath, platformValue, nameValue) {
   let platform = validatePlatform(platformValue);
   const name = validateGameName(nameValue);
   let markdown = fs.readFileSync(filePath, 'utf8');
-  const platforms = parsePlatforms(markdown);
+  const games = parseCatalog(markdown);
+  const platforms = parsePlatforms(markdown, games);
   const existingPlatform = platforms.find(item => normalizeKey(item.name) === normalizeKey(platform));
   if (existingPlatform) platform = existingPlatform.name;
   else platforms.push({ id: crypto.randomUUID(), name: platform });
-  if (parseCatalog(markdown).some(game => gameKey(game.platform, game.name) === gameKey(platform, name))) {
-    throw new Error('That game is already approved.');
+  if (games.some(game => gameKey(game.platform, game.name) === gameKey(platform, name))) {
+    throw new HttpError(400, 'That game is already approved.');
   }
   const id = crypto.randomUUID();
   markdown = withPlatforms(markdown, platforms);
@@ -124,17 +147,17 @@ function addApprovedGame(filePath, platformValue, nameValue) {
   return { id, platform, name, pinned: {} };
 }
 
-function updateApprovedGame(filePath, gameId, platformValue, nameValue) {
+export function updateApprovedGame(filePath, gameId, platformValue, nameValue) {
   const markdown = fs.readFileSync(filePath, 'utf8');
   const games = parseCatalog(markdown);
   const game = games.find(item => item.id === gameId);
-  if (!game) throw new Error('That approved game no longer exists.');
+  if (!game) throw new HttpError(404, 'That approved game no longer exists.');
   const name = validateGameName(nameValue);
-  const platforms = parsePlatforms(markdown);
+  const platforms = parsePlatforms(markdown, games);
   const platform = platforms.find(item => normalizeKey(item.name) === normalizeKey(validatePlatform(platformValue)));
-  if (!platform) throw new Error('Please add that platform first.');
+  if (!platform) throw new HttpError(400, 'Please add that platform first.');
   if (games.some(item => item.id !== game.id && gameKey(item.platform, item.name) === gameKey(platform.name, name))) {
-    throw new Error('That game is already approved.');
+    throw new HttpError(400, 'That game is already approved.');
   }
   const lines = markdown.split(/\r?\n/);
   replaceGame(lines, game, platform.name, name);
@@ -142,25 +165,30 @@ function updateApprovedGame(filePath, gameId, platformValue, nameValue) {
   return { ...game, platform: platform.name, name };
 }
 
-function addPlatform(filePath, nameValue) {
+export function addPlatform(filePath, nameValue) {
   const name = validatePlatform(nameValue);
   const markdown = fs.readFileSync(filePath, 'utf8');
   const platforms = parsePlatforms(markdown);
-  if (platforms.some(item => normalizeKey(item.name) === normalizeKey(name))) throw new Error('That platform already exists.');
+  if (platforms.some(item => normalizeKey(item.name) === normalizeKey(name))) {
+    throw new HttpError(400, 'That platform already exists.');
+  }
   const platform = { id: crypto.randomUUID(), name };
   writeCatalog(filePath, withPlatforms(markdown, [...platforms, platform]));
   return platform;
 }
 
-function updatePlatform(filePath, id, nameValue) {
+export function updatePlatform(filePath, id, nameValue) {
   const name = validatePlatform(nameValue);
   const markdown = fs.readFileSync(filePath, 'utf8');
-  const platforms = parsePlatforms(markdown);
+  const games = parseCatalog(markdown);
+  const platforms = parsePlatforms(markdown, games);
   const platform = platforms.find(item => item.id === id);
-  if (!platform) throw new Error('That platform no longer exists.');
-  if (platforms.some(item => item.id !== id && normalizeKey(item.name) === normalizeKey(name))) throw new Error('That platform already exists.');
+  if (!platform) throw new HttpError(404, 'That platform no longer exists.');
+  if (platforms.some(item => item.id !== id && normalizeKey(item.name) === normalizeKey(name))) {
+    throw new HttpError(400, 'That platform already exists.');
+  }
   const lines = markdown.split(/\r?\n/);
-  for (const game of parseCatalog(markdown).filter(item => normalizeKey(item.platform) === normalizeKey(platform.name))) {
+  for (const game of games.filter(item => normalizeKey(item.platform) === normalizeKey(platform.name))) {
     replaceGame(lines, game, name, game.name);
   }
   platform.name = name;
@@ -168,42 +196,46 @@ function updatePlatform(filePath, id, nameValue) {
   return platform;
 }
 
-function removePlatform(filePath, id) {
+export function removePlatform(filePath, id) {
   const markdown = fs.readFileSync(filePath, 'utf8');
-  const platforms = parsePlatforms(markdown);
+  const games = parseCatalog(markdown);
+  const platforms = parsePlatforms(markdown, games);
   const platform = platforms.find(item => item.id === id);
-  if (!platform) throw new Error('That platform no longer exists.');
-  if (parseCatalog(markdown).some(game => normalizeKey(game.platform) === normalizeKey(platform.name))) {
-    throw new Error('Move or remove the games using this platform first.');
+  if (!platform) throw new HttpError(404, 'That platform no longer exists.');
+  if (games.some(game => normalizeKey(game.platform) === normalizeKey(platform.name))) {
+    throw new HttpError(409, 'Move or remove the games using this platform first.');
   }
   writeCatalog(filePath, withPlatforms(markdown, platforms.filter(item => item.id !== id)));
   return platform;
 }
 
-function pinLine(pin) { return `- [${pin.badge}](${pin.url}) <!-- guide-id: ${pin.id} -->`; }
-
-function upsertPinnedGuide(filePath, gameId, badgeValue, url, previous = null) {
-  const badge = validateGuideName(badgeValue);
+export function upsertPinnedGuide(filePath, gameId, guideValue, url, previous = null) {
+  const guide = validateGuideName(guideValue);
   // Only validated canonical URLs can be persisted, including callers outside HTTP.
-  const { extractYouTubeId, canonicalYouTubeUrl } = require('./discovery');
   const videoId = extractYouTubeId(url);
-  if (!videoId) throw new Error('Pinned guide is not a canonical YouTube video URL.');
-  url = canonicalYouTubeUrl(videoId);
+  if (!videoId) throw new HttpError(400, 'Pinned guide is not a canonical YouTube video URL.');
+  const canonicalUrl = canonicalYouTubeUrl(videoId);
   const markdown = fs.readFileSync(filePath, 'utf8');
   const games = parseCatalog(markdown);
   const game = games.find(item => item.id === gameId);
-  if (!game) throw new Error('Please choose an approved game.');
+  if (!game) throw new HttpError(400, 'Please choose an approved game.');
   const oldGame = previous ? games.find(item => item.id === previous.gameId) : game;
-  const oldPin = previous ? Object.values(oldGame?.pinned || {}).find(pin => pin.id === previous.id) : game.pinned[normalizeKey(badge)];
-  if (previous && !oldPin) throw new Error('That pre-approved guide no longer exists.');
-  const duplicate = game.pinned[normalizeKey(badge)];
-  if (previous && duplicate && duplicate.id !== oldPin.id) throw new Error('That pre-approved guide already exists.');
-  const pin = { id: oldPin?.id || crypto.randomUUID(), badge, url };
+  const oldPin = previous
+    ? Object.values(oldGame?.pinned || {}).find(pin => pin.id === previous.id)
+    : game.pinned[normalizeKey(guide)];
+  if (previous && !oldPin) throw new HttpError(404, 'That pre-approved guide no longer exists.');
+  const duplicate = game.pinned[normalizeKey(guide)];
+  if (previous && duplicate && duplicate.id !== oldPin.id) {
+    throw new HttpError(400, 'That pre-approved guide already exists.');
+  }
+  const pin = { id: oldPin?.id || crypto.randomUUID(), guide, url: canonicalUrl };
   const lines = markdown.split(/\r?\n/);
   if (oldPin) {
     const { start, end } = gameSection(lines, oldGame);
-    const index = lines.findIndex((line, index) => index > start && index < end && normalizeKey(line.match(PIN)?.[1]) === normalizeKey(oldPin.badge));
-    if (index < 0) throw new Error('The pre-approved guide entry could not be found.');
+    const index = lines.findIndex((line, lineIndex) => (
+      lineIndex > start && lineIndex < end && normalizeKey(line.match(PIN)?.[1]) === normalizeKey(oldPin.guide)
+    ));
+    if (index < 0) throw new HttpError(404, 'The pre-approved guide entry could not be found.');
     lines.splice(index, 1);
   }
   const { start, end } = gameSection(lines, game);
@@ -214,35 +246,32 @@ function upsertPinnedGuide(filePath, gameId, badgeValue, url, previous = null) {
   return { game, ...pin, replaced: Boolean(oldPin) };
 }
 
-function removePinnedGuide(filePath, gameId, badgeValue) {
-  const badge = validateGuideName(badgeValue);
+export function removePinnedGuide(filePath, gameId, guideValue) {
+  const guide = validateGuideName(guideValue);
   const markdown = fs.readFileSync(filePath, 'utf8');
   const game = parseCatalog(markdown).find(item => item.id === gameId);
-  if (!game) throw new Error('Please choose an approved game.');
-  const pin = game.pinned[normalizeKey(badge)];
-  if (!pin) throw new Error('That approved video no longer exists.');
+  if (!game) throw new HttpError(400, 'Please choose an approved game.');
+  const pin = game.pinned[normalizeKey(guide)];
+  if (!pin) throw new HttpError(404, 'That approved video no longer exists.');
   const lines = markdown.split(/\r?\n/);
   const { start, end } = gameSection(lines, game);
-  const index = lines.findIndex((line, index) => index > start && index < end && normalizeKey(line.match(PIN)?.[1]) === normalizeKey(badge));
-  if (index < 0) throw new Error('The approved video entry could not be found.');
+  const index = lines.findIndex((line, lineIndex) => (
+    lineIndex > start && lineIndex < end && normalizeKey(line.match(PIN)?.[1]) === normalizeKey(guide)
+  ));
+  if (index < 0) throw new HttpError(404, 'The approved video entry could not be found.');
   lines.splice(index, 1);
   writeCatalog(filePath, lines.join('\n'));
   return { game, pin };
 }
 
-function removeApprovedGame(filePath, gameId) {
+export function removeApprovedGame(filePath, gameId) {
   const markdown = fs.readFileSync(filePath, 'utf8');
-  const game = parseCatalog(markdown).find(item => item.id === gameId);
-  if (!game) throw new Error('That approved game no longer exists.');
+  const games = parseCatalog(markdown);
+  const game = games.find(item => item.id === gameId);
+  if (!game) throw new HttpError(404, 'That approved game no longer exists.');
   const lines = markdown.split(/\r?\n/);
   const { start, end } = gameSection(lines, game);
   lines.splice(start, end - start);
-  writeCatalog(filePath, withPlatforms(lines.join('\n'), parsePlatforms(markdown)));
+  writeCatalog(filePath, withPlatforms(lines.join('\n'), parsePlatforms(markdown, games)));
   return game;
 }
-
-module.exports = {
-  addApprovedGame, updateApprovedGame, loadCatalog, parseCatalog, publicGames, gameKey,
-  addPlatform, updatePlatform, removePlatform, loadPlatforms,
-  removeApprovedGame, removePinnedGuide, upsertPinnedGuide
-};

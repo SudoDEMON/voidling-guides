@@ -1,31 +1,16 @@
 #!/usr/bin/env node
-'use strict';
-
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { findAgy } from '../src/agy.js';
+import { isMainModule } from '../src/fs-utils.js';
 
 const INSTALL_URL = 'https://antigravity.google/cli/install.sh';
 
-function findAgy({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
-  const candidates = ['agy'];
-  if (platform === 'win32') {
-    const local = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    candidates.push(path.join(local, 'Microsoft', 'WinGet', 'Links', 'agy.exe'),
-      path.join(local, 'agy', 'bin', 'agy.exe'));
-  } else if (platform === 'linux' || platform === 'darwin') {
-    candidates.push(path.join(env.HOME || os.homedir(), '.local', 'bin', 'agy'));
-  }
-  let probe;
-  for (const command of candidates) {
-    probe = { command, result: run(command, ['--version'], { env, encoding: 'utf8', timeout: 5000 }) };
-    if (probe.result.error?.code !== 'ENOENT') return probe;
-  }
-  return probe;
-}
+export { findAgy };
 
-async function installAgy({
+export async function installAgy({
   platform = process.platform,
   env = process.env,
   run = spawnSync,
@@ -46,10 +31,10 @@ async function installAgy({
     throw new Error('agy is present but cannot run. Resolve its --version error before reinstalling.');
   }
 
-  function execute(command, args) {
-    const result = run(command, args, { env, stdio: 'inherit' });
+  function execute(execCommand, args) {
+    const result = run(execCommand, args, { env, stdio: 'inherit' });
     if (result.error || result.status !== 0) {
-      throw new Error(`${command} installation failed: ${result.error?.message || `exit ${result.status}`}`);
+      throw new Error(`${execCommand} installation failed: ${result.error?.message || `exit ${result.status}`}`);
     }
   }
 
@@ -61,8 +46,10 @@ async function installAgy({
       '--scope', 'user', '--accept-package-agreements', '--accept-source-agreements',
       '--disable-interactivity'
     ]);
-    installedPath = path.join(env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-      'Microsoft', 'WinGet', 'Links', 'agy.exe');
+    installedPath = path.join(
+      env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
+      'Microsoft', 'WinGet', 'Links', 'agy.exe'
+    );
   } else {
     log(`Installing Antigravity CLI with Google's installer: ${INSTALL_URL}`);
     const response = await download(INSTALL_URL, { signal: AbortSignal.timeout(30_000) });
@@ -87,7 +74,7 @@ async function installAgy({
   return installedPath;
 }
 
-if (require.main === module) {
+if (isMainModule(import.meta.url)) {
   installAgy().then(() => {
     console.log('Open a fresh terminal, run agy once to sign in, then run npm run doctor.');
   }).catch(error => {
@@ -96,5 +83,3 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-
-module.exports = { findAgy, installAgy };

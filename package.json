@@ -2,18 +2,20 @@
   "name": "voidling-guides",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Kid-friendly LAN guide requester backed by YouTube, Antigravity, and local WebM playback.",
   "scripts": {
     "setup:agy": "node scripts/install-agy.js",
     "web": "node server.js",
     "set-password": "node scripts/set-admin-password.js",
     "configure-lan": "node scripts/configure-lan.js",
+    "check": "node scripts/check-repo.js",
     "test": "node --test",
     "doctor": "node src/doctor.js",
     "firewall": "node scripts/configure-firewall.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "license": "ISC"
 }

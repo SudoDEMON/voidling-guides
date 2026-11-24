@@ -1,12 +1,10 @@
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { dadFixture } = require('../test-support/dad-fixture');
-const { loadCatalog, loadPlatforms, addApprovedGame, updateApprovedGame, updatePlatform } = require('../src/catalog');
-const { LibraryStore } = require('../src/store');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+import { addApprovedGame, loadCatalog, loadPlatforms, updateApprovedGame, updatePlatform } from '../src/catalog.js';
+import { LibraryStore } from '../src/store.js';
+import { dadFixture } from '../test-support/dad-fixture.js';
 
 async function fixture(t, options) {
   const context = await dadFixture(options);
@@ -128,10 +126,10 @@ test('Pre-Approve adds a guide without downloading; editing preserves pin/librar
   const edit = { previousGameId: f.game.id, pinId: originalId, gameId: f.game.id, guide: 'Correct Guide', url: validUrl, download: false };
   result = await f.api('/dad/api/pins', 'PATCH', edit);
   assert.equal(result.status, 200);
-  assert.equal(result.body.games[0].pins.find(pin => pin.badge === 'Correct Guide').id, originalId);
-  assert.equal(result.body.games[0].pins.some(pin => pin.badge === 'Old Guide'), false);
+  assert.equal(result.body.games[0].pins.find(pin => pin.guide === 'Correct Guide').id, originalId);
+  assert.equal(result.body.games[0].pins.some(pin => pin.guide === 'Old Guide'), false);
   assert.equal(result.body.requests[0].id, f.guide.id);
-  assert.equal(result.body.requests[0].badge, 'Correct Guide');
+  assert.equal(result.body.requests[0].guide, 'Correct Guide');
   assert.equal(fs.readFileSync(f.guide.filePath, 'utf8'), 'fixture webm');
   const before = fs.readFileSync(f.catalogPath, 'utf8');
   assert.equal((await f.api('/dad/api/pins', 'PATCH', { ...edit, guide: 'NEW GUIDE' })).status, 400);
@@ -147,11 +145,11 @@ test('Pre-Approve adds a guide without downloading; editing preserves pin/librar
 test('guide edits synchronize matching pre-approvals, keep stable IDs, and retain history after removal', async t => {
   const f = await fixture(t);
   const originalId = f.game.pinned['old guide'].id;
-  let result = await f.api(`/dad/api/requests/${f.guide.id}`, 'POST', { gameId: f.game.id, guide: 'Correct Guide' });
+  let result = await f.api(`/dad/api/requests/${f.guide.id}`, 'PATCH', { gameId: f.game.id, guide: 'Correct Guide' });
   assert.equal(result.status, 200);
   assert.equal(result.body.requests[0].id, f.guide.id);
   assert.equal(result.body.games[0].pins[0].id, originalId);
-  assert.equal(result.body.games[0].pins[0].badge, 'Correct Guide');
+  assert.equal(result.body.games[0].pins[0].guide, 'Correct Guide');
   const filePath = f.guide.filePath;
   result = await f.api(`/dad/api/requests/${f.guide.id}`, 'DELETE', {});
   assert.equal(result.status, 200);
@@ -159,7 +157,7 @@ test('guide edits synchronize matching pre-approvals, keep stable IDs, and retai
   assert.equal(result.body.requests.length, 0);
   assert.match(result.body.history.entries.join('\n'), /REQUESTED - Test Gmae - Old Guide/);
   assert.match(result.body.history.entries.join('\n'), /DAD_REQUEST_REMOVED/);
-  for (let i = 0; i < 40; i += 1) f.audit.append('REQUESTED', { game: 'Fixture', badge: `Guide ${i}` });
+  for (let i = 0; i < 40; i += 1) f.audit.append('REQUESTED', { game: 'Fixture', guide: `Guide ${i}` });
   for (let i = 0; i < 120; i += 1) f.audit.append('DAD_LOGIN', {});
   const page = (await f.api('/dad/api/history')).body;
   assert.equal(page.entries.length, 30);
@@ -171,14 +169,14 @@ test('guide edits synchronize matching pre-approvals, keep stable IDs, and retai
 
 test('approval can reuse a corrected pending guide without losing its request identity or log', async t => {
   const f = await fixture(t);
-  f.store.update(f.guide.id, { status: 'needs_confirmation', suggestedBadge: 'Old Guide Extended' });
+  f.store.update(f.guide.id, { status: 'needs_confirmation', suggestedGuide: 'Old Guide Extended' });
   const result = await f.api('/dad/api/pins', 'POST', {
     gameId: f.game.id, requestId: f.guide.id, guide: 'Old Guide Extended', url: validUrl, download: true
   });
   assert.equal(result.status, 201);
   assert.deepEqual(f.enqueued, [f.guide.id]);
   assert.equal(f.store.state.guides.length, 1);
-  assert.equal(f.guide.badge, 'Old Guide Extended');
+  assert.equal(f.guide.guide, 'Old Guide Extended');
   assert.match(result.body.history.entries.join('\n'), /REQUESTED - Test Gmae - Old Guide/);
 });
 
@@ -191,7 +189,7 @@ test('busy guide mutations fail without changing catalog or files', async t => {
     [`/dad/api/games/${f.game.id}`, 'PATCH', { platform: 'Roblox', name: 'Changed Game' }],
     [`/dad/api/platforms/${platform.id}`, 'PATCH', { name: 'Changed Platform' }],
     ['/dad/api/pins', 'POST', { gameId: f.game.id, guide: 'Old Guide', url: validUrl, download: false }],
-    [`/dad/api/requests/${f.guide.id}`, 'POST', { gameId: f.game.id, guide: 'Changed Guide' }]
+    [`/dad/api/requests/${f.guide.id}`, 'PATCH', { gameId: f.game.id, guide: 'Changed Guide' }]
   ];
   for (const [url, method, body] of cases) assert.equal((await f.api(url, method, body)).status, 409);
   assert.equal(fs.readFileSync(f.catalogPath, 'utf8'), before);

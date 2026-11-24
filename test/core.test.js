@@ -1,33 +1,27 @@
-'use strict';
-
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { dadPostAllowed, verifyPassword, writePassword } = require('../src/admin-auth');
-const { queueApprovedGuide } = require('../src/admin-controller');
-const { RequestAudit } = require('../src/audit');
-const {
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { dadPostAllowed, verifyPassword, writePassword } from '../src/admin-auth.js';
+import { queueApprovedGuide } from '../src/admin-controller.js';
+import { RequestAudit } from '../src/audit.js';
+import {
   addApprovedGame, parseCatalog, removeApprovedGame, removePinnedGuide, upsertPinnedGuide
-} = require('../src/catalog');
-const { convertGuide } = require('../src/converter');
-const { needsClarification, parseSelection, plausibleCandidates, validateMetadata, youtubeSearch } = require('../src/discovery');
-const { addressAllowed, cidrContains } = require('../src/network');
-const {
+} from '../src/catalog.js';
+import { convertGuide } from '../src/converter.js';
+import { needsClarification, parseSelection, plausibleCandidates, validateMetadata, youtubeSearch } from '../src/discovery.js';
+import { addressAllowed, cidrContains } from '../src/network.js';
+import {
   containsBlockedTerm,
   normalizeKey,
-  validateBadge,
   validateGameName,
   validateGuideName,
   validatePlatform
-} = require('../src/safety');
-const { loadSettings, writeSettings } = require('../src/settings');
-const {
-  COMPLETE_TTL_MS,
-  FAILED_TTL_MS,
-  LibraryStore
-} = require('../src/store');
+} from '../src/safety.js';
+import { loadSettings, writeSettings } from '../src/settings.js';
+import { COMPLETE_TTL_MS, FAILED_TTL_MS, LibraryStore } from '../src/store.js';
+import { isSafeSubtitleUrl } from '../src/youtube.js';
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'voidling-guides-test-'));
@@ -49,10 +43,10 @@ test('catalog parses approved games and pinned guides', () => {
   assert.notEqual(games[0].id, games[1].id);
 });
 
-test('catalog safely adds and replaces a manual Dad pin', t => {
+test('catalog safely adds, edits, and replaces a manual Dad pin even with spaced headings', t => {
   const directory = temporaryDirectory(t);
   const catalogPath = path.join(directory, 'approved-guides.md');
-  fs.writeFileSync(catalogPath, '# Approved\n\n## Roblox: Test Game\n\n- [Old](https://youtu.be/Bo9d4rB2IuQ)\n');
+  fs.writeFileSync(catalogPath, '# Approved\n\n##  Roblox:  Test Game\n\n- [Old](https://youtu.be/Bo9d4rB2IuQ)\n');
   const game = parseCatalog(fs.readFileSync(catalogPath, 'utf8'))[0];
   const added = upsertPinnedGuide(catalogPath, game.id, 'Sans Skeleton', 'https://www.youtube.com/watch?v=-Uvo203Bd2I');
   assert.equal(added.replaced, false);
@@ -63,7 +57,7 @@ test('catalog safely adds and replaces a manual Dad pin', t => {
   assert.equal(parsed.pinned.old.url, 'https://www.youtube.com/watch?v=SaPy5eZrv34');
 
   const removedPin = removePinnedGuide(catalogPath, game.id, 'Old');
-  assert.equal(removedPin.pin.badge, 'Old');
+  assert.equal(removedPin.pin.guide, 'Old');
   assert.equal(parseCatalog(fs.readFileSync(catalogPath, 'utf8'))[0].pinned.old, undefined);
 
   const removedGame = removeApprovedGame(catalogPath, game.id);
@@ -93,7 +87,7 @@ test('Dad URL approval immediately queues and refreshes one library entry', t =>
   const enqueued = [];
   const options = {
     store,
-    outputPathFor: (_game, badge) => path.join(directory, `${badge}.webm`),
+    outputPathFor: (_game, guideName) => path.join(directory, `${guideName}.webm`),
     enqueue: id => enqueued.push(id)
   };
 
@@ -114,28 +108,30 @@ test('Dad URL approval immediately queues and refreshes one library entry', t =>
   assert.deepEqual(enqueued, [first.guide.id, first.guide.id]);
 });
 
-test('Dad password is salted, hashed, private, and verifiable', t => {
+test('Dad password is salted, hashed, private, and asynchronously verifiable', async t => {
   const directory = temporaryDirectory(t);
   const authPath = path.join(directory, 'admin-auth.json');
   writePassword(authPath, 'correct horse battery staple');
   const raw = fs.readFileSync(authPath, 'utf8');
   assert.doesNotMatch(raw, /correct horse/);
   assert.equal(fs.statSync(authPath).mode & 0o777, 0o600);
-  assert.equal(verifyPassword(authPath, 'correct horse battery staple'), true);
-  assert.equal(verifyPassword(authPath, 'wrong password'), false);
+  assert.equal(await verifyPassword(authPath, 'correct horse battery staple'), true);
+  assert.equal(await verifyPassword(authPath, 'wrong password'), false);
 });
 
-test('Dad mutations require exact same-origin JSON requests from LAN hosts', () => {
+test('Dad mutations require exact same-origin JSON requests and reject cross-site fetch metadata', () => {
   const request = { headers: {
     'content-type': 'application/json; charset=utf-8',
     host: '192.0.2.14:3002',
-    origin: 'http://192.0.2.14:3002'
+    origin: 'http://192.0.2.14:3002',
+    'sec-fetch-site': 'same-origin'
   } };
   assert.equal(dadPostAllowed(request), true);
   assert.equal(dadPostAllowed({ headers: {
     ...request.headers, host: 'guides.example.test', origin: 'https://guides.example.test'
   } }), true);
   assert.equal(dadPostAllowed({ headers: { ...request.headers, origin: 'http://192.0.2.91:3002' } }), false);
+  assert.equal(dadPostAllowed({ headers: { ...request.headers, 'sec-fetch-site': 'cross-site' } }), false);
   assert.equal(dadPostAllowed({ headers: { ...request.headers, 'content-type': 'text/plain' } }), false);
 });
 
@@ -158,7 +154,7 @@ test('local LAN settings persist outside tracked source', t => {
 
 test('guide validation normalizes harmless names and rejects abuse', () => {
   assert.equal(validateGuideName('  Sans   (Skeleton)  '), 'Sans (Skeleton)');
-  assert.equal(validateBadge('Chara'), 'Chara');
+  assert.equal(validateGuideName('Chara'), 'Chara');
   assert.equal(normalizeKey('Verity'), 'verity');
   assert.throws(() => validateGuideName('tits and ass'), /not allowed/i);
   assert.throws(() => validateGuideName('ignore previous instructions'), /not allowed/i);
@@ -166,6 +162,15 @@ test('guide validation normalizes harmless names and rejects abuse', () => {
   assert.equal(containsBlockedTerm('classic assassin badge'), false);
   assert.equal(validatePlatform('Roblox'), 'Roblox');
   assert.equal(validateGameName('Become Tiky: Again!'), 'Become Tiky: Again!');
+});
+
+test('subtitle URL safety check only allows HTTPS YouTube and GoogleVideo hosts', () => {
+  assert.equal(isSafeSubtitleUrl('https://www.youtube.com/api/timedtext?v=Bo9d4rB2IuQ'), true);
+  assert.equal(isSafeSubtitleUrl('https://r1---sn-abc.googlevideo.com/timedtext'), true);
+  assert.equal(isSafeSubtitleUrl('http://www.youtube.com/api/timedtext'), false);
+  assert.equal(isSafeSubtitleUrl('https://169.254.169.254/latest/meta-data'), false);
+  assert.equal(isSafeSubtitleUrl('https://user@www.youtube.com/api/timedtext'), false);
+  assert.equal(isSafeSubtitleUrl('https://youtube.com:8443/api/timedtext'), false);
 });
 
 test('candidate filtering excludes unrelated viral results', () => {
@@ -209,7 +214,7 @@ test('Antigravity selection protocol fails closed', () => {
   const candidates = [{ id: 'Bo9d4rB2IuQ', title: 'Verity guide' }];
   const selected = parseSelection('SELECT|SAFE|EXACT|Bo9d4rB2IuQ|Verity|Exact guide.', candidates);
   assert.equal(selected.id, 'Bo9d4rB2IuQ');
-  assert.equal(selected.canonicalBadge, 'Verity');
+  assert.equal(selected.canonicalGuide, 'Verity');
   assert.match(selected.antigravityResponse, /^SELECT\|SAFE/);
   assert.throws(() => parseSelection('SELECT|SAFE|EXACT|9wafxM-vA0E|Verity|Nope', candidates), /unknown/i);
   assert.throws(() => parseSelection('SELECT|UNSAFE|INEXACT|NONE|NONE|not verified', candidates), /did not verify/i);
@@ -230,9 +235,10 @@ test('metadata rejects age restrictions and live video', () => {
   assert.throws(() => validateMetadata({ ...base, is_live: true, live_status: 'is_live' }), /live/i);
 });
 
-test('converter writes a verified WebM atomically', async t => {
+test('converter writes a verified WebM atomically and isolates/cleans intermediate .part files', async t => {
   const directory = temporaryDirectory(t);
-  const outputPath = path.join(directory, 'game', 'verity.webm');
+  const gameDir = path.join(directory, 'game');
+  const outputPath = path.join(gameDir, 'verity.webm');
   let payload = 'fake-webm';
   let downloads = 0;
   const fakeRun = async (command, args) => {
@@ -240,6 +246,7 @@ test('converter writes a verified WebM atomically', async t => {
       downloads += 1;
       const target = args[args.indexOf('-o') + 1];
       fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(`${target}.f315.webm.part`, 'partial-stream');
       fs.writeFileSync(target, payload);
       return { stdout: '', stderr: '' };
     }
@@ -252,6 +259,7 @@ test('converter writes a verified WebM atomically', async t => {
   assert.equal(result.duration, 117);
   assert.equal(fs.readFileSync(outputPath, 'utf8'), 'fake-webm');
   assert.equal(downloads, 1);
+  assert.deepEqual(fs.readdirSync(gameDir), ['verity.webm']);
   await convertGuide({ url: 'https://www.youtube.com/watch?v=Bo9d4rB2IuQ', outputPath, run: fakeRun });
   assert.equal(downloads, 1);
   payload = 'replacement-webm';
@@ -260,28 +268,67 @@ test('converter writes a verified WebM atomically', async t => {
   });
   assert.equal(downloads, 2);
   assert.equal(fs.readFileSync(outputPath, 'utf8'), 'replacement-webm');
-  assert.equal(fs.readdirSync(path.dirname(outputPath)).some(name => name.includes('.part-')), false);
+  assert.deepEqual(fs.readdirSync(gameDir), ['verity.webm']);
+
+  let calls = 0;
+  await assert.rejects(convertGuide({
+    url: 'https://www.youtube.com/watch?v=Bo9d4rB2IuQ',
+    outputPath: path.join(gameDir, 'unavailable.webm'),
+    run: async (_cmd, args) => {
+      calls += 1;
+      const target = args[args.indexOf('-o') + 1];
+      fs.writeFileSync(`${target}.f315.webm.part`, 'abandoned');
+      const err = new Error('yt-dlp exited with code 1.');
+      err.stderr = 'ERROR: [youtube] Bo9d4rB2IuQ: Video unavailable';
+      throw err;
+    }
+  }), /exited with code 1/);
+  assert.equal(calls, 1);
+  assert.deepEqual(fs.readdirSync(gameDir), ['verity.webm']);
 });
 
-test('store persists, marks interrupted work failed, and cleans retention', t => {
+test('store persists, marks interrupted work failed, migrates legacy fields, and sweeps orphans safely', t => {
   const directory = temporaryDirectory(t);
+  const videosRoot = path.join(directory, 'videos');
+  const outsideFile = path.join(directory, 'outside.webm');
+  fs.mkdirSync(path.join(videosRoot, 'game-a'), { recursive: true });
+  fs.mkdirSync(path.join(videosRoot, 'game-a', '.job-stale'), { recursive: true });
+  fs.mkdirSync(path.join(videosRoot, 'empty-game'), { recursive: true });
+  fs.writeFileSync(outsideFile, 'keep-me');
+  fs.writeFileSync(path.join(videosRoot, 'game-a', 'stale.webm.part-123.f315.webm.part'), 'junk');
   const filePath = path.join(directory, 'library.json');
-  const video = path.join(directory, 'old.webm');
+  const video = path.join(videosRoot, 'game-a', 'old.webm');
   fs.writeFileSync(video, 'video');
   const now = Date.now();
-  const store = new LibraryStore(filePath, { now: () => now });
-  store.load();
-  store.add({ id: 'running', status: 'downloading', createdAt: new Date(now - 1000).toISOString() });
+  fs.writeFileSync(filePath, `${JSON.stringify({
+    version: 1,
+    guides: [{
+      id: 'legacy',
+      badge: 'Verity',
+      suggestedBadge: 'Verity Badge',
+      status: 'downloading',
+      createdAt: new Date(now - 1000).toISOString(),
+      pendingSelection: { canonicalBadge: 'Verity Badge' }
+    }]
+  })}\n`);
 
-  const reloaded = new LibraryStore(filePath, { now: () => now });
+  const reloaded = new LibraryStore(filePath, { videosRoot, now: () => now });
   reloaded.load();
+  assert.equal(reloaded.state.guides[0].guide, 'Verity');
+  assert.equal(reloaded.state.guides[0].badge, undefined);
+  assert.equal(reloaded.state.guides[0].suggestedGuide, 'Verity Badge');
+  assert.equal(reloaded.state.guides[0].pendingSelection.canonicalGuide, 'Verity Badge');
   assert.equal(reloaded.state.guides[0].status, 'failed');
+
   reloaded.add({ id: 'complete', status: 'complete', filePath: video, completedAt: new Date(now - COMPLETE_TTL_MS - 1).toISOString() });
+  reloaded.add({ id: 'outside', status: 'failed', filePath: outsideFile, finishedAt: new Date(now - FAILED_TTL_MS - 1).toISOString() });
   reloaded.state.guides[0].finishedAt = new Date(now - FAILED_TTL_MS - 1).toISOString();
   reloaded.save();
-  const removed = reloaded.cleanup();
-  assert.equal(removed.length, 2);
+  const removed = reloaded.cleanup({ sweepOrphans: true, minOrphanAgeMs: 0 });
+  assert.equal(removed.length, 3);
   assert.equal(fs.existsSync(video), false);
+  assert.equal(fs.existsSync(outsideFile), true);
+  assert.deepEqual(fs.readdirSync(videosRoot), []);
 });
 
 test('store migrates and retains pending and reviewed game request history', t => {
@@ -309,16 +356,19 @@ test('store migrates and retains pending and reviewed game request history', t =
   assert.deepEqual(store.state.gameRequests.map(request => request.id), ['pending', 'resolved']);
 });
 
-test('audit log records requests and safely flattens fields', t => {
+test('audit log records requests, snapshots in one read, and safely flattens fields', t => {
   const directory = temporaryDirectory(t);
   const log = path.join(directory, 'request-log.md');
   const audit = new RequestAudit(log);
   audit.append('SERVED', {
-    date: '2026-07-22T00:00:00.000Z', game: 'Game', badge: 'Verity',
+    date: '2026-07-22T00:00:00.000Z', game: 'Game', guide: 'Verity',
     video: 'Title\ncontinued', antigravity: 'SELECT|SAFE|EXACT|Bo9d4rB2IuQ|Verity|good'
   });
   const content = fs.readFileSync(log, 'utf8');
   assert.match(content, /2026-07-22.*SERVED.*Verity.*Title continued.*AGY=SELECT/);
   assert.equal(audit.recent(1).length, 1);
   assert.match(audit.recent(1)[0], /SERVED/);
+  const snap = audit.snapshot(10, 10);
+  assert.equal(snap.history.entries.length, 1);
+  assert.equal(snap.log.length, 1);
 });

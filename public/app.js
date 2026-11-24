@@ -1,4 +1,4 @@
-'use strict';
+import { el, jsonFetch, setMessage } from '/client-utils.js';
 
 const form = document.querySelector('#requestForm');
 const gameSelect = document.querySelector('#gameId');
@@ -16,9 +16,13 @@ const serverPill = document.querySelector('#serverPill');
 const serverStatus = document.querySelector('#serverStatus');
 const mascot = document.querySelector('#mascot');
 const mascotCanvas = document.querySelector('#mascotCanvas');
-let lastGuideJson = '';
+
+const cardState = new Map();
 let mascotStarted = false;
-const MASCOT_FRAME_COUNT = 6;
+let guidesInFlight = false;
+let gamesInFlight = false;
+let sseOpen = false;
+
 const MASCOT_FRAMES = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1];
 const MASCOT_FRAME_WIDTH = 192;
 const MASCOT_FRAME_HEIGHT = 208;
@@ -28,40 +32,62 @@ function startMascot(url) {
   if (!url || mascotStarted || !mascotCanvas) return;
   mascotStarted = true;
   const context = mascotCanvas.getContext('2d');
+  if (!context) return;
   const sheet = new Image();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let index = 0;
   let previous = 0;
+  let rafId = 0;
+
+  const paintFrame = frameIndex => {
+    context.clearRect(0, 0, mascotCanvas.width, mascotCanvas.height);
+    context.drawImage(
+      sheet,
+      MASCOT_FRAMES[frameIndex] * MASCOT_FRAME_WIDTH,
+      MASCOT_ROW * MASCOT_FRAME_HEIGHT,
+      MASCOT_FRAME_WIDTH,
+      MASCOT_FRAME_HEIGHT,
+      0,
+      0,
+      mascotCanvas.width,
+      mascotCanvas.height
+    );
+  };
+
+  const step = timestamp => {
+    if (reducedMotion.matches) {
+      rafId = 0;
+      paintFrame(0);
+      return;
+    }
+    if (timestamp - previous >= 180) {
+      previous = timestamp;
+      paintFrame(index);
+      index = (index + 1) % MASCOT_FRAMES.length;
+    }
+    rafId = requestAnimationFrame(step);
+  };
+
   sheet.onload = () => {
     mascotCanvas.width = MASCOT_FRAME_WIDTH;
     mascotCanvas.height = MASCOT_FRAME_HEIGHT;
     mascot.hidden = false;
-    const draw = timestamp => {
-      if (timestamp - previous >= 180) {
-        previous = timestamp;
-        context.clearRect(0, 0, mascotCanvas.width, mascotCanvas.height);
-        context.drawImage(
-          sheet,
-          MASCOT_FRAMES[index] * MASCOT_FRAME_WIDTH, MASCOT_ROW * MASCOT_FRAME_HEIGHT,
-          MASCOT_FRAME_WIDTH, MASCOT_FRAME_HEIGHT,
-          0, 0, mascotCanvas.width, mascotCanvas.height
-        );
-        index = (index + 1) % MASCOT_FRAMES.length;
+    paintFrame(0);
+    if (!reducedMotion.matches) rafId = requestAnimationFrame(step);
+    reducedMotion.addEventListener('change', () => {
+      if (reducedMotion.matches) {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = 0;
+        paintFrame(0);
+      } else if (!rafId) {
+        rafId = requestAnimationFrame(step);
       }
-      requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
+    });
+  };
+  sheet.onerror = () => {
+    mascot.hidden = true;
   };
   sheet.src = url;
-}
-
-function setMessage(message, type = '') {
-  formMessage.textContent = message;
-  formMessage.className = `form-message ${type}`.trim();
-}
-
-function setGameRequestMessage(message, type = '') {
-  gameRequestMessage.textContent = message;
-  gameRequestMessage.className = `form-message ${type}`.trim();
 }
 
 function formatDuration(seconds) {
@@ -77,65 +103,49 @@ function formatSize(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function makeText(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  node.textContent = text;
-  return node;
-}
-
 async function answerClarification(guide, accept, buttons) {
   for (const button of buttons) button.disabled = true;
-  setMessage(accept ? `Okay—getting the ${guide.suggestedBadge} guide...` : 'Okay—nothing will be downloaded.');
+  setMessage(
+    formMessage,
+    accept ? `Okay—getting the ${guide.suggestedGuide} guide...` : 'Okay—nothing will be downloaded.',
+    'form-message'
+  );
   try {
-    const response = await fetch(`/api/guides/${encodeURIComponent(guide.id)}/confirmation`, {
+    await jsonFetch(`/api/guides/${encodeURIComponent(guide.id)}/confirmation`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ accept })
     });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || 'Could not save that answer.');
     setMessage(
-      accept ? `${guide.suggestedBadge} confirmed! The guide is on its way.` : 'Thanks! Ask Dad to approve a video if you still need this guide.',
+      formMessage,
+      accept ? `${guide.suggestedGuide} confirmed! The guide is on its way.` : 'Thanks! Ask Dad to approve a video if you still need this guide.',
+      'form-message',
       'success'
     );
     await loadGuides();
   } catch (error) {
-    setMessage(error.message, 'error');
+    setMessage(formMessage, error.message, 'form-message', 'error');
     for (const button of buttons) button.disabled = false;
   }
 }
 
-function renderGuide(guide) {
-  const card = document.createElement('article');
-  card.className = `guide-card status-${guide.status}`;
-  if (guide.status === 'complete' && guide.mediaUrl) {
-    const video = document.createElement('video');
-    video.controls = true;
-    video.preload = 'metadata';
-    video.src = guide.mediaUrl;
-    card.append(video);
-  }
-  const body = document.createElement('div');
-  body.className = 'guide-body';
-  body.append(makeText('p', 'guide-game', `${guide.platform} · ${guide.game}`));
-  body.append(makeText('h3', '', guide.badge));
+function populateCardBody(body, guide) {
+  body.replaceChildren();
+  body.append(el('p', 'guide-game', `${guide.platform} · ${guide.game}`));
+  body.append(el('h3', '', guide.guide));
   if (guide.sourceTitle) {
     const detail = guide.status === 'complete'
       ? `${guide.sourceTitle} · ${guide.channel || 'YouTube'} · ${formatDuration(guide.duration)} · ${formatSize(guide.size)}`
       : `${guide.sourceTitle}${guide.channel ? ` · ${guide.channel}` : ''}`;
-    body.append(makeText('p', 'guide-source', detail));
+    body.append(el('p', 'guide-source', detail));
   }
-  const status = document.createElement('div');
-  status.className = 'status-line';
-  status.append(makeText('span', 'status-dot', ''));
-  status.append(makeText('span', '', guide.message || guide.status));
+  const status = el('div', 'status-line');
+  status.append(el('span', 'status-dot'), el('span', '', guide.message || guide.status));
   body.append(status);
-  if (guide.status === 'needs_confirmation' && guide.suggestedBadge) {
-    const actions = document.createElement('div');
-    actions.className = 'confirmation-actions';
-    const yes = makeText('button', 'confirm-button', `Yes, ${guide.suggestedBadge}`);
-    const no = makeText('button', 'decline-button', 'No, that is different');
+  if (guide.status === 'needs_confirmation' && guide.suggestedGuide) {
+    const actions = el('div', 'confirmation-actions');
+    const yes = el('button', '', `Yes, ${guide.suggestedGuide}`);
+    const no = el('button', 'decline-button', 'No, that is different');
     yes.type = 'button';
     no.type = 'button';
     const buttons = [yes, no];
@@ -144,59 +154,128 @@ function renderGuide(guide) {
     actions.append(yes, no);
     body.append(actions);
   }
+}
+
+function createGuideEntry(guide) {
+  const card = document.createElement('article');
+  card.className = `guide-card status-${guide.status}`;
+  const body = el('div', 'guide-body');
+  let video = null;
+  if (guide.status === 'complete' && guide.mediaUrl) {
+    video = document.createElement('video');
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = guide.mediaUrl;
+    card.append(video);
+  }
+  populateCardBody(body, guide);
   card.append(body);
-  return card;
+  return { card, body, video, mediaUrl: guide.mediaUrl || null, signature: JSON.stringify(guide) };
+}
+
+function updateGuideEntry(entry, guide) {
+  const nextSignature = JSON.stringify(guide);
+  if (entry.signature === nextSignature) return;
+  entry.signature = nextSignature;
+  entry.card.className = `guide-card status-${guide.status}`;
+  const nextMediaUrl = guide.status === 'complete' ? (guide.mediaUrl || null) : null;
+  if (nextMediaUrl !== entry.mediaUrl) {
+    if (entry.video) {
+      entry.video.remove();
+      entry.video = null;
+    }
+    if (nextMediaUrl) {
+      const video = document.createElement('video');
+      video.controls = true;
+      video.preload = 'metadata';
+      video.src = nextMediaUrl;
+      entry.card.prepend(video);
+      entry.video = video;
+    }
+    entry.mediaUrl = nextMediaUrl;
+  }
+  populateCardBody(entry.body, guide);
 }
 
 function renderGuides(guides) {
-  const signature = JSON.stringify(guides);
-  if (signature === lastGuideJson) return;
-  lastGuideJson = signature;
-  guideGrid.replaceChildren();
   if (guides.length === 0) {
-    guideGrid.append(makeText('div', 'empty-card', 'No guides yet. Request one above!'));
+    cardState.clear();
+    guideGrid.replaceChildren(el('div', 'empty-card', 'No guides yet. Request one above!'));
     return;
   }
-  for (const guide of guides) guideGrid.append(renderGuide(guide));
+  const emptyCard = guideGrid.querySelector('.empty-card');
+  if (emptyCard) emptyCard.remove();
+
+  const seen = new Set();
+  for (const guide of guides) {
+    seen.add(guide.id);
+    let entry = cardState.get(guide.id);
+    if (!entry) {
+      entry = createGuideEntry(guide);
+      cardState.set(guide.id, entry);
+    } else {
+      updateGuideEntry(entry, guide);
+    }
+  }
+  for (const [id, entry] of cardState) {
+    if (!seen.has(id)) {
+      entry.card.remove();
+      cardState.delete(id);
+    }
+  }
+  for (let index = 0; index < guides.length; index += 1) {
+    const targetCard = cardState.get(guides[index].id).card;
+    const currentAtSlot = guideGrid.children[index];
+    if (currentAtSlot !== targetCard) {
+      guideGrid.insertBefore(targetCard, currentAtSlot || null);
+    }
+  }
 }
 
 async function loadGames() {
-  const response = await fetch('/api/games', { cache: 'no-store' });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Could not load approved games.');
-  const selected = gameSelect.value;
-  gameSelect.replaceChildren();
-  if (body.games.length === 0) {
-    const option = document.createElement('option');
-    option.textContent = 'No approved games yet';
-    option.disabled = true;
-    option.selected = true;
-    gameSelect.append(option);
-    requestButton.disabled = true;
-    return;
+  if (gamesInFlight) return;
+  gamesInFlight = true;
+  try {
+    const body = await jsonFetch('/api/games');
+    const selected = gameSelect.value;
+    gameSelect.replaceChildren();
+    if (body.games.length === 0) {
+      const option = document.createElement('option');
+      option.textContent = 'No approved games yet';
+      option.disabled = true;
+      option.selected = true;
+      gameSelect.append(option);
+      requestButton.disabled = true;
+      return;
+    }
+    for (const game of body.games) {
+      const option = document.createElement('option');
+      option.value = game.id;
+      option.textContent = `${game.platform}: ${game.name}`;
+      gameSelect.append(option);
+    }
+    if ([...gameSelect.options].some(option => option.value === selected)) gameSelect.value = selected;
+    requestButton.disabled = false;
+  } finally {
+    gamesInFlight = false;
   }
-  for (const game of body.games) {
-    const option = document.createElement('option');
-    option.value = game.id;
-    option.textContent = `${game.platform}: ${game.name}`;
-    gameSelect.append(option);
-  }
-  if ([...gameSelect.options].some(option => option.value === selected)) gameSelect.value = selected;
-  requestButton.disabled = false;
 }
 
 async function loadGuides() {
-  const response = await fetch('/api/guides', { cache: 'no-store' });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Could not load guides.');
-  renderGuides(body.guides);
+  if (guidesInFlight) return;
+  guidesInFlight = true;
+  try {
+    const body = await jsonFetch('/api/guides');
+    renderGuides(body.guides);
+  } finally {
+    guidesInFlight = false;
+  }
 }
 
 async function checkHealth() {
   try {
-    const response = await fetch('/api/health', { cache: 'no-store' });
-    const body = await response.json();
-    if (!response.ok || !body.ok) throw new Error('A guide tool is missing');
+    const body = await jsonFetch('/api/health');
+    if (!body.ok) throw new Error('A guide tool is missing');
     serverPill.className = 'server-pill ready';
     serverStatus.textContent = 'Guide server ready';
     startMascot(body.mascotUrl);
@@ -206,54 +285,77 @@ async function checkHealth() {
   }
 }
 
+function connectEvents() {
+  if (typeof EventSource !== 'function') return;
+  const source = new EventSource('/api/events');
+  source.addEventListener('open', () => { sseOpen = true; });
+  source.addEventListener('error', () => { sseOpen = false; });
+  source.addEventListener('guides', () => { loadGuides().catch(() => {}); });
+  source.addEventListener('games', () => { loadGames().catch(() => {}); });
+}
+
 form.addEventListener('submit', async event => {
   event.preventDefault();
   requestButton.disabled = true;
-  setMessage('Sending your request...');
+  setMessage(formMessage, 'Sending your request...', 'form-message');
   try {
-    const response = await fetch('/api/requests', {
+    const body = await jsonFetch('/api/requests', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ gameId: gameSelect.value, guide: guideInput.value })
     });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || 'Could not request that guide.');
     guideInput.value = '';
-    setMessage(body.duplicate ? 'That guide is already in the library or on the way.' : 'Request added! You can watch it here when it is ready.', 'success');
+    setMessage(
+      formMessage,
+      body.duplicate ? 'That guide is already in the library or on the way.' : 'Request added! You can watch it here when it is ready.',
+      'form-message',
+      'success'
+    );
     await loadGuides();
   } catch (error) {
-    setMessage(error.message, 'error');
+    setMessage(formMessage, error.message, 'form-message', 'error');
   } finally {
-    requestButton.disabled = false;
+    requestButton.disabled = gameSelect.options.length === 0 || gameSelect.options[0]?.disabled;
   }
 });
 
 gameRequestForm.addEventListener('submit', async event => {
   event.preventDefault();
   gameRequestButton.disabled = true;
-  setGameRequestMessage('Sending the game request to Dad...');
+  setMessage(gameRequestMessage, 'Sending the game request to Dad...', 'form-message');
   try {
-    const response = await fetch('/api/game-requests', {
+    const body = await jsonFetch('/api/game-requests', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ platform: requestedPlatform.value, name: requestedGame.value })
     });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || 'Could not request that game.');
     requestedGame.value = '';
-    setGameRequestMessage(
+    setMessage(
+      gameRequestMessage,
       body.duplicate ? 'Dad already has this game request.' : 'Request sent! Dad can approve it from his page.',
+      'form-message',
       'success'
     );
   } catch (error) {
-    setGameRequestMessage(error.message, 'error');
+    setMessage(gameRequestMessage, error.message, 'form-message', 'error');
   } finally {
     gameRequestButton.disabled = false;
   }
 });
 
-refreshButton.addEventListener('click', () => loadGuides().catch(error => setMessage(error.message, 'error')));
+refreshButton.addEventListener('click', () => loadGuides().catch(error => setMessage(formMessage, error.message, 'form-message', 'error')));
 
-Promise.all([checkHealth(), loadGames(), loadGuides()]).catch(error => setMessage(error.message, 'error'));
-setInterval(() => loadGuides().catch(() => {}), 2500);
-setInterval(() => loadGames().catch(() => {}), 10_000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    loadGuides().catch(() => {});
+    loadGames().catch(() => {});
+  }
+});
+
+Promise.all([checkHealth(), loadGames(), loadGuides()]).catch(error => setMessage(formMessage, error.message, 'form-message', 'error'));
+connectEvents();
+setInterval(() => {
+  if (document.hidden || sseOpen) return;
+  loadGuides().catch(() => {});
+  loadGames().catch(() => {});
+}, 15_000);

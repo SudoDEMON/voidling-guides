@@ -1,11 +1,9 @@
-'use strict';
-
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { runDoctor } = require('../src/doctor');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { runDoctor } from '../src/doctor.js';
 
 const missing = { error: Object.assign(new Error('not found'), { code: 'ENOENT' }) };
 const success = { status: 0, stdout: 'test-version\n' };
@@ -24,7 +22,8 @@ test('doctor automatically installs missing agy and rechecks the returned execut
   let installed = false;
   let installs = 0;
   const checked = [];
-  const result = await runDoctor({ ...options,
+  const result = await runDoctor({
+    ...options,
     run(command) {
       checked.push(command);
       return isAgy(command) && !installed ? missing : success;
@@ -39,7 +38,9 @@ test('doctor automatically installs missing agy and rechecks the returned execut
 
 test('check-only neither installs missing agy nor initializes local data', async t => {
   const options = fixture(t);
-  const result = await runDoctor({ ...options, checkOnly: true,
+  const result = await runDoctor({
+    ...options,
+    checkOnly: true,
     run: command => isAgy(command) ? missing : success,
     install: () => assert.fail('check-only must not install')
   });
@@ -50,7 +51,9 @@ test('check-only neither installs missing agy nor initializes local data', async
 
 test('doctor preserves working agy and explains an empty local catalog', async t => {
   const options = fixture(t);
-  assert.equal(await runDoctor({ ...options, run: () => success,
+  assert.equal(await runDoctor({
+    ...options,
+    run: () => success,
     install: () => assert.fail('working installation must be preserved')
   }), 0);
   assert.ok(options.output.some(line => line.includes('No approved games on this machine')));
@@ -59,7 +62,8 @@ test('doctor preserves working agy and explains an empty local catalog', async t
 
 test('doctor reports installation errors and continues other checks', async t => {
   const options = fixture(t);
-  assert.equal(await runDoctor({ ...options,
+  assert.equal(await runDoctor({
+    ...options,
     run: command => isAgy(command) ? missing : success,
     install: async () => { throw new Error('installer unavailable'); }
   }), 1);
@@ -68,14 +72,16 @@ test('doctor reports installation errors and continues other checks', async t =>
 });
 
 test('doctor does not reinstall an existing broken agy', async t => {
-  assert.equal(await runDoctor({ ...fixture(t),
+  assert.equal(await runDoctor({
+    ...fixture(t),
     run: command => isAgy(command) ? { status: 1, stderr: 'broken installation' } : success,
     install: () => assert.fail('broken installation needs diagnosis, not replacement')
   }), 1);
 });
 
 test('doctor fails if the installed executable cannot run', async t => {
-  assert.equal(await runDoctor({ ...fixture(t),
+  assert.equal(await runDoctor({
+    ...fixture(t),
     run: command => isAgy(command) ? missing : success,
     install: async () => 'still-missing/agy.exe'
   }), 1);

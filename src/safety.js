@@ -1,13 +1,20 @@
-'use strict';
-
-const crypto = require('crypto');
+import crypto from 'node:crypto';
+import { HttpError } from './fs-utils.js';
 
 const BLOCKED_TERMS = [
-  'adult video', 'ass', 'bitch', 'boob', 'boobs', 'breast porn', 'cock', 'cocaine', 'cum',
+  'adult video', 'ass', 'bitch', 'boob', 'boobs', 'cock', 'cocaine', 'cum',
   'dick', 'fetish', 'fuck', 'fucking', 'hentai', 'naked', 'nude', 'onlyfans',
-  'porn', 'pornhub', 'pussy', 'rape', 'sex', 'sexual', 'shit', 'tits', 'vagina',
-  'weed porn', 'xxx'
+  'porn', 'pornhub', 'pussy', 'rape', 'sex', 'sexual', 'shit', 'tits', 'vagina', 'xxx'
 ];
+
+const BLOCKED_PATTERN = new RegExp(
+  BLOCKED_TERMS.map(term => (
+    term.includes(' ')
+      ? RegExp.escape(term).replace(/\\ /g, '\\s+')
+      : `\\b${RegExp.escape(term)}\\b`
+  )).join('|'),
+  'iu'
+);
 
 const INJECTION_PATTERNS = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/i,
@@ -21,69 +28,49 @@ const INJECTION_PATTERNS = [
   /[<>`{}\[\]\\]/
 ];
 
+const ALLOWED_LABEL_CHARS = /^[\p{L}\p{N}][\p{L}\p{N}\s&'’().,!+_:\-]*$/u;
+
 function collapseWhitespace(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
 
-function normalizeKey(value) {
+export function normalizeKey(value) {
   return collapseWhitespace(value).normalize('NFKC').toLocaleLowerCase('en-US');
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function containsBlockedTerm(value) {
+  return BLOCKED_PATTERN.test(normalizeKey(value));
 }
 
-function containsBlockedTerm(value) {
-  const normalized = normalizeKey(value);
-  return BLOCKED_TERMS.some(term => {
-    const pattern = term.includes(' ')
-      ? escapeRegExp(term).replace(/\\ /g, '\\s+')
-      : `\\b${escapeRegExp(term)}\\b`;
-    return new RegExp(pattern, 'iu').test(normalized);
-  });
-}
-
-function validateGuideName(value) {
-  const guideName = collapseWhitespace(value).normalize('NFKC');
-  if (guideName.length < 2 || guideName.length > 64) {
-    throw new Error('Guide name must be between 2 and 64 characters.');
-  }
-  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s&'’().,!+_:\-]*$/u.test(guideName)) {
-    throw new Error('Guide name contains unsupported characters.');
-  }
-  if (INJECTION_PATTERNS.some(pattern => pattern.test(guideName)) || containsBlockedTerm(guideName)) {
-    throw new Error('That request is not allowed. Please ask Dad for help.');
-  }
-  return guideName;
-}
-
-const validateBadge = validateGuideName;
-
-function validateCatalogLabel(value, label, minimum, maximum) {
+function validateLabel(value, label, minimum, maximum, blockedMessage = `${label} is not allowed.`) {
   const result = collapseWhitespace(value).normalize('NFKC');
   if (result.length < minimum || result.length > maximum) {
-    throw new Error(`${label} must be between ${minimum} and ${maximum} characters.`);
+    throw new HttpError(400, `${label} must be between ${minimum} and ${maximum} characters.`);
   }
-  if (!/^[\p{L}\p{N}][\p{L}\p{N}\s&'’().,!+_:\-]*$/u.test(result)) {
-    throw new Error(`${label} contains unsupported characters.`);
+  if (!ALLOWED_LABEL_CHARS.test(result)) {
+    throw new HttpError(400, `${label} contains unsupported characters.`);
   }
   if (INJECTION_PATTERNS.some(pattern => pattern.test(result)) || containsBlockedTerm(result)) {
-    throw new Error(`${label} is not allowed.`);
+    throw new HttpError(400, blockedMessage);
   }
   return result;
 }
 
-function validateGameName(value) {
-  return validateCatalogLabel(value, 'Game name', 2, 100);
+export function validateGuideName(value) {
+  return validateLabel(value, 'Guide name', 2, 64, 'That request is not allowed. Please ask Dad for help.');
 }
 
-function validatePlatform(value) {
-  const name = validateCatalogLabel(value, 'Platform', 2, 32);
-  if (name.includes(':')) throw new Error('Platform cannot contain a colon.');
+export function validateGameName(value) {
+  return validateLabel(value, 'Game name', 2, 100);
+}
+
+export function validatePlatform(value) {
+  const name = validateLabel(value, 'Platform', 2, 32);
+  if (name.includes(':')) throw new HttpError(400, 'Platform cannot contain a colon.');
   return name;
 }
 
-function slug(value, fallback = 'guide') {
+export function slug(value, fallback = 'guide') {
   const result = normalizeKey(value)
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -93,29 +80,15 @@ function slug(value, fallback = 'guide') {
   return result || fallback;
 }
 
-function stableId(value) {
+export function stableId(value) {
   const base = slug(value, 'item');
   const suffix = crypto.createHash('sha256').update(normalizeKey(value)).digest('hex').slice(0, 8);
   return `${base}-${suffix}`;
 }
 
-function safeMetadata(candidate) {
+export function safeMetadata(candidate) {
   const text = [candidate.title, candidate.description, candidate.channel, candidate.transcript]
     .filter(Boolean)
     .join(' ');
   return !containsBlockedTerm(text);
 }
-
-module.exports = {
-  BLOCKED_TERMS,
-  collapseWhitespace,
-  containsBlockedTerm,
-  normalizeKey,
-  safeMetadata,
-  slug,
-  stableId,
-  validateBadge,
-  validateGuideName,
-  validateGameName,
-  validatePlatform
-};

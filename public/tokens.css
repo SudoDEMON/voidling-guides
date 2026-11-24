@@ -1,0 +1,14 @@
+:root {
+  color-scheme: dark;
+  --black: #000000;
+  --bg: #000000;
+  --blue: #1793D1;
+  --orange: #D15517;
+  --line: rgba(23, 147, 209, .42);
+  --muted: #a5b2ba;
+  --text: #ffffff;
+}
+
+* { box-sizing: border-box; }
+button, input, select { font: inherit; }
+[hidden] { display: none !important; }

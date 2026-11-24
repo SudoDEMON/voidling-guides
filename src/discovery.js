@@ -1,29 +1,12 @@
-'use strict';
+import os from 'node:os';
+import { resolveAgyCommand } from './agy.js';
+import { HttpError } from './fs-utils.js';
+import { run } from './process.js';
+import { containsBlockedTerm, normalizeKey, safeMetadata, validateGuideName } from './safety.js';
+import { YOUTUBE_ID, canonicalYouTubeUrl, extractYouTubeId, isSafeSubtitleUrl } from './youtube.js';
 
-const os = require('os');
-const { run } = require('./process');
-const { containsBlockedTerm, normalizeKey, safeMetadata, validateGuideName } = require('./safety');
-
-const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const GENERIC_WORDS = new Set(['again', 'badge', 'game', 'get', 'guide', 'how', 'roblox', 'the', 'to']);
-
-function canonicalYouTubeUrl(id) {
-  if (!YOUTUBE_ID.test(String(id || ''))) throw new Error('Invalid YouTube video ID.');
-  return `https://www.youtube.com/watch?v=${id}`;
-}
-
-function extractYouTubeId(value) {
-  try {
-    const url = new URL(String(value || '').trim());
-    const host = url.hostname.replace(/^www\./, '');
-    const id = host === 'youtu.be'
-      ? url.pathname.split('/').filter(Boolean)[0]
-      : (host === 'youtube.com' || host.endsWith('.youtube.com') ? url.searchParams.get('v') : '');
-    return YOUTUBE_ID.test(id || '') ? id : '';
-  } catch {
-    return '';
-  }
-}
+const MAX_SUBTITLE_BYTES = 1024 * 1024;
 
 function usefulTokens(value) {
   return normalizeKey(value).split(/[^a-z0-9]+/).filter(word => word.length >= 3 && !GENERIC_WORDS.has(word));
@@ -41,7 +24,7 @@ function candidateScore(entry, game, guideName) {
   return score;
 }
 
-function plausibleCandidates(entries, game, guideName) {
+export function plausibleCandidates(entries, game, guideName) {
   return (Array.isArray(entries) ? entries : [])
     .filter(entry => entry && YOUTUBE_ID.test(entry.id || ''))
     .map(entry => ({ ...entry, score: candidateScore(entry, game, guideName) }))
@@ -50,7 +33,7 @@ function plausibleCandidates(entries, game, guideName) {
     .slice(0, 3);
 }
 
-async function youtubeSearch(game, guideName, options = {}) {
+export async function youtubeSearch(game, guideName, options = {}) {
   const queries = [
     `${game.platform} "${game.name}" "${guideName}" guide`,
     `How to get or use ${guideName} in ${game.name} ${game.platform}`,
@@ -82,13 +65,41 @@ function firstEnglishSubtitle(metadata) {
   return null;
 }
 
-async function subtitleExcerpt(metadata, fetchImpl = global.fetch) {
+async function readBoundedText(response, maxBytes) {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      throw new Error('Subtitle response exceeded size limit.');
+    }
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error('Subtitle response exceeded size limit.');
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+export async function subtitleExcerpt(metadata, fetchImpl = globalThis.fetch) {
   const track = firstEnglishSubtitle(metadata);
-  if (!track || !track.url || typeof fetchImpl !== 'function') return '';
+  if (!track || !track.url || typeof fetchImpl !== 'function' || !isSafeSubtitleUrl(track.url)) return '';
   try {
     const response = await fetchImpl(track.url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) return '';
-    const raw = await response.text();
+    const raw = await readBoundedText(response, MAX_SUBTITLE_BYTES);
     let text = raw;
     if (track.ext === 'json3') {
       const json = JSON.parse(raw);
@@ -100,13 +111,15 @@ async function subtitleExcerpt(metadata, fetchImpl = global.fetch) {
   }
 }
 
-function validateMetadata(metadata) {
-  if (!metadata || !YOUTUBE_ID.test(metadata.id || '')) throw new Error('YouTube returned invalid video metadata.');
-  if (metadata._type === 'playlist') throw new Error('Playlists are not allowed.');
-  if (Number(metadata.age_limit || 0) > 0) throw new Error('Age-restricted videos are not allowed.');
-  if (metadata.is_live || (metadata.live_status && metadata.live_status !== 'not_live')) throw new Error('Live videos are not allowed.');
+export function validateMetadata(metadata) {
+  if (!metadata || !YOUTUBE_ID.test(metadata.id || '')) throw new HttpError(400, 'YouTube returned invalid video metadata.');
+  if (metadata._type === 'playlist') throw new HttpError(400, 'Playlists are not allowed.');
+  if (Number(metadata.age_limit || 0) > 0) throw new HttpError(400, 'Age-restricted videos are not allowed.');
+  if (metadata.is_live || (metadata.live_status && metadata.live_status !== 'not_live')) {
+    throw new HttpError(400, 'Live videos are not allowed.');
+  }
   if (['private', 'premium_only', 'subscriber_only', 'needs_auth'].includes(metadata.availability)) {
-    throw new Error('The selected video is not publicly available.');
+    throw new HttpError(400, 'The selected video is not publicly available.');
   }
   const candidate = {
     id: metadata.id,
@@ -119,7 +132,7 @@ function validateMetadata(metadata) {
     subtitles: metadata.subtitles,
     automatic_captions: metadata.automatic_captions
   };
-  if (!candidate.title || !safeMetadata(candidate)) throw new Error('Video metadata did not pass the safety check.');
+  if (!candidate.title || !safeMetadata(candidate)) throw new HttpError(400, 'Video metadata did not pass the safety check.');
   return candidate;
 }
 
@@ -132,7 +145,7 @@ async function fullMetadata(id, options = {}) {
   const candidate = validateMetadata(metadata);
   candidate.transcript = await subtitleExcerpt(metadata, options.fetch);
   if (candidate.transcript && containsBlockedTerm(candidate.transcript)) {
-    throw new Error('Video captions did not pass the safety check.');
+    throw new HttpError(400, 'Video captions did not pass the safety check.');
   }
   delete candidate.subtitles;
   delete candidate.automatic_captions;
@@ -158,7 +171,7 @@ function selectionPrompt(game, guideName, candidates) {
   ].join('\n');
 }
 
-function parseSelection(output, candidates) {
+export function parseSelection(output, candidates) {
   const line = String(output || '').trim().split(/\r?\n/).find(value => value.startsWith('SELECT|')) || '';
   const match = line.match(/^SELECT\|(SAFE|UNSAFE)\|(EXACT|INEXACT)\|([A-Za-z0-9_-]{11}|NONE)\|([^|]+)\|(.+)$/);
   if (!match || match[1] !== 'SAFE' || match[2] !== 'EXACT' || match[3] === 'NONE' || match[4] === 'NONE') {
@@ -168,57 +181,53 @@ function parseSelection(output, candidates) {
   }
   const selected = candidates.find(candidate => candidate.id === match[3]);
   if (!selected) throw new Error('Antigravity selected an unknown candidate.');
-  let canonicalBadge;
-  try { canonicalBadge = validateGuideName(match[4]); } catch {
+  let canonicalGuide;
+  try {
+    canonicalGuide = validateGuideName(match[4]);
+  } catch {
     const error = new Error('Antigravity returned an invalid canonical guide name.');
     error.antigravityResponse = line;
     throw error;
   }
-  return { ...selected, canonicalBadge, selectionReason: match[5].trim(), antigravityResponse: line };
+  return { ...selected, canonicalGuide, selectionReason: match[5].trim(), antigravityResponse: line };
 }
 
-function needsClarification(requestedBadge, canonicalBadge) {
-  const requested = normalizeKey(requestedBadge);
-  const canonical = normalizeKey(canonicalBadge);
+export function needsClarification(requestedGuide, canonicalGuide) {
+  const requested = normalizeKey(requestedGuide);
+  const canonical = normalizeKey(canonicalGuide);
   if (!requested || !canonical || requested === canonical) return false;
   const requestedTokens = requested.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   return requestedTokens.length > 0 && requestedTokens.every(token => canonical.split(/[^\p{L}\p{N}]+/u).includes(token));
 }
 
 async function selectWithAntigravity(game, guideName, candidates, options = {}) {
-  const result = await (options.run || run)('agy', [
+  const agyCommand = options.agyCommand || resolveAgyCommand();
+  const result = await (options.run || run)(agyCommand, [
     '--mode', 'plan', '--sandbox', '--print-timeout', '60s', '-p', selectionPrompt(game, guideName, candidates)
   ], { cwd: os.tmpdir(), timeoutMs: 75_000, maxBuffer: 2 * 1024 * 1024 });
   return parseSelection(result.stdout, candidates);
 }
 
-async function discoverGuide(game, guideName, options = {}) {
+export async function discoverGuide(game, guideName, options = {}) {
   const search = await youtubeSearch(game, guideName, options);
   const checked = [];
+  const rejections = [];
   for (const entry of search) {
-    try { checked.push(await fullMetadata(entry.id, options)); } catch { /* fail closed per candidate */ }
+    try {
+      checked.push(await fullMetadata(entry.id, options));
+    } catch (error) {
+      rejections.push(`${entry.id}: ${error.message}`);
+    }
   }
-  if (checked.length === 0) throw new Error('No YouTube candidates passed validation.');
+  if (checked.length === 0) {
+    const detail = rejections.length ? ` (${rejections.slice(0, 3).join('; ')})` : '';
+    throw new Error(`No YouTube candidates passed validation.${detail}`);
+  }
   return selectWithAntigravity(game, guideName, checked, options);
 }
 
-async function validatePinnedGuide(url, options = {}) {
+export async function validatePinnedGuide(url, options = {}) {
   const id = extractYouTubeId(url);
-  if (!id) throw new Error('Pinned guide is not a canonical YouTube video URL.');
+  if (!id) throw new HttpError(400, 'Pinned guide is not a canonical YouTube video URL.');
   return fullMetadata(id, options);
 }
-
-module.exports = {
-  canonicalYouTubeUrl,
-  candidateScore,
-  discoverGuide,
-  extractYouTubeId,
-  fullMetadata,
-  parseSelection,
-  needsClarification,
-  plausibleCandidates,
-  selectWithAntigravity,
-  validateMetadata,
-  validatePinnedGuide,
-  youtubeSearch
-};

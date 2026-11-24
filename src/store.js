@@ -1,18 +1,94 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { isWithinDirectory, writeFileAtomic } from './fs-utils.js';
 
-const fs = require('fs');
-const path = require('path');
-
-const COMPLETE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const FAILED_TTL_MS = 24 * 60 * 60 * 1000;
+export const COMPLETE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const FAILED_TTL_MS = 24 * 60 * 60 * 1000;
+export const BUSY_STATUSES = new Set(['queued', 'searching', 'checking', 'downloading']);
+export const ACTIVE_DUPLICATE_STATUSES = new Set([...BUSY_STATUSES, 'needs_confirmation', 'complete']);
 
 function defaultState() {
   return { version: 1, guides: [], gameRequests: [] };
 }
 
-class LibraryStore {
+function normalizeSelection(selection) {
+  if (!selection || typeof selection !== 'object') return selection;
+  if (selection.canonicalGuide === undefined && selection.canonicalBadge !== undefined) {
+    const next = { ...selection, canonicalGuide: selection.canonicalBadge };
+    delete next.canonicalBadge;
+    return next;
+  }
+  return selection;
+}
+
+function normalizeGuideRecord(record) {
+  let changed = false;
+  if (record.guide === undefined && record.badge !== undefined) {
+    record.guide = record.badge;
+    delete record.badge;
+    changed = true;
+  }
+  if (record.suggestedGuide === undefined && record.suggestedBadge !== undefined) {
+    record.suggestedGuide = record.suggestedBadge;
+    delete record.suggestedBadge;
+    changed = true;
+  }
+  if (record.pendingSelection?.canonicalBadge !== undefined && record.pendingSelection.canonicalGuide === undefined) {
+    record.pendingSelection = normalizeSelection(record.pendingSelection);
+    changed = true;
+  }
+  if (record.approvedSelection?.canonicalBadge !== undefined && record.approvedSelection.canonicalGuide === undefined) {
+    record.approvedSelection = normalizeSelection(record.approvedSelection);
+    changed = true;
+  }
+  return changed;
+}
+
+function removeManagedFile(videosRoot, filePath) {
+  if (!isWithinDirectory(videosRoot, filePath)) return;
+  fs.rmSync(filePath, { force: true });
+  const parent = path.dirname(filePath);
+  if (isWithinDirectory(videosRoot, parent)) {
+    try {
+      fs.rmdirSync(parent);
+    } catch (error) {
+      if (!['ENOENT', 'ENOTEMPTY'].includes(error?.code)) throw error;
+    }
+  }
+}
+
+function sweepVideoOrphans(videosRoot, now, minOrphanAgeMs) {
+  if (!fs.existsSync(videosRoot)) return;
+  const dirs = fs.readdirSync(videosRoot, { withFileTypes: true }).filter(entry => entry.isDirectory());
+  for (const dirEntry of dirs) {
+    const dirPath = path.join(videosRoot, dirEntry.name);
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      const target = path.join(dirPath, entry.name);
+      if (!isWithinDirectory(videosRoot, target)) continue;
+      if (entry.isDirectory() && entry.name.startsWith('.job-')) {
+        const stat = minOrphanAgeMs > 0 ? fs.statSync(target, { throwIfNoEntry: false }) : null;
+        if (minOrphanAgeMs <= 0 || (stat && now - stat.mtimeMs >= minOrphanAgeMs)) {
+          fs.rmSync(target, { recursive: true, force: true });
+        }
+      } else if (entry.isFile() && entry.name.includes('.part')) {
+        const stat = minOrphanAgeMs > 0 ? fs.statSync(target, { throwIfNoEntry: false }) : null;
+        if (minOrphanAgeMs <= 0 || (stat && now - stat.mtimeMs >= minOrphanAgeMs)) {
+          fs.rmSync(target, { force: true });
+        }
+      }
+    }
+    try {
+      if (fs.readdirSync(dirPath).length === 0) fs.rmdirSync(dirPath);
+    } catch (error) {
+      if (!['ENOENT', 'ENOTEMPTY'].includes(error?.code)) throw error;
+    }
+  }
+}
+
+export class LibraryStore {
   constructor(filePath, options = {}) {
     this.filePath = filePath;
+    this.videosRoot = options.videosRoot || path.join(path.dirname(filePath), 'videos');
     this.now = options.now || (() => Date.now());
     this.state = defaultState();
   }
@@ -33,7 +109,8 @@ class LibraryStore {
       changed = true;
     }
     for (const guide of this.state.guides) {
-      if (guide.status === 'queued' || ['searching', 'checking', 'downloading'].includes(guide.status)) {
+      if (normalizeGuideRecord(guide)) changed = true;
+      if (BUSY_STATUSES.has(guide.status)) {
         guide.status = 'failed';
         guide.message = 'The server stopped before this guide finished. Please request it again.';
         guide.finishedAt = nowIso;
@@ -45,10 +122,7 @@ class LibraryStore {
   }
 
   save() {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const temp = `${this.filePath}.tmp`;
-    fs.writeFileSync(temp, `${JSON.stringify(this.state, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(temp, this.filePath);
+    writeFileAtomic(this.filePath, `${JSON.stringify(this.state, null, 2)}\n`, { mode: 0o600 });
   }
 
   add(guide) {
@@ -73,7 +147,7 @@ class LibraryStore {
   }
 
   findDuplicate(key) {
-    return this.state.guides.find(guide => guide.key === key && ['queued', 'searching', 'checking', 'needs_confirmation', 'downloading', 'complete'].includes(guide.status));
+    return this.state.guides.find(guide => guide.key === key && ACTIVE_DUPLICATE_STATUSES.has(guide.status));
   }
 
   addGameRequest(request) {
@@ -101,7 +175,7 @@ class LibraryStore {
     return this.state.gameRequests.find(request => request.key === key && request.status === 'pending');
   }
 
-  cleanup() {
+  cleanup({ sweepOrphans = false, minOrphanAgeMs = 5 * 60 * 1000 } = {}) {
     const now = this.now();
     const kept = [];
     const removed = [];
@@ -111,7 +185,7 @@ class LibraryStore {
       const expiredFailed = guide.status === 'failed' && Number.isFinite(finished) && now - finished >= FAILED_TTL_MS;
       const missingFile = guide.status === 'complete' && (!guide.filePath || !fs.existsSync(guide.filePath));
       if (expiredComplete || expiredFailed || missingFile) {
-        if (guide.filePath) fs.rmSync(guide.filePath, { force: true });
+        if (guide.filePath) removeManagedFile(this.videosRoot, guide.filePath);
         removed.push(guide);
       } else {
         kept.push(guide);
@@ -119,10 +193,11 @@ class LibraryStore {
     }
     if (removed.length > 0) {
       this.state.guides = kept;
+      this.save();
     }
-    if (removed.length > 0) this.save();
+    if (sweepOrphans) {
+      sweepVideoOrphans(this.videosRoot, now, minOrphanAgeMs);
+    }
     return removed;
   }
 }
-
-module.exports = { COMPLETE_TTL_MS, FAILED_TTL_MS, LibraryStore, defaultState };

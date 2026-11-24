@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dad Approval · Voidling Guides</title>
+  <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/dad/styles.css">
 </head>
 <body>
@@ -131,6 +132,15 @@
     </div>
   </main>
 
-  <script src="/dad/app.js" defer></script>
+  <dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmDialogTitle" aria-describedby="confirmDialogBody">
+    <h3 id="confirmDialogTitle">Confirm removal</h3>
+    <p id="confirmDialogBody"></p>
+    <div class="form-actions">
+      <button type="button" class="quiet-button" id="confirmDialogCancel">Cancel</button>
+      <button type="button" class="confirm-accept" id="confirmDialogAccept">Remove</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/dad/app.js"></script>
 </body>
 </html>

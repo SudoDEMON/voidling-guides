@@ -5,12 +5,36 @@ PORT=${VOIDLING_PORT:-3002}
 MODE=${1:-add}
 LAN_CIDR=${2:-}
 
+valid_ipv4_cidr() {
+  local value=$1
+  local require_prefix=$2
+  local ip prefix octets octet
+
+  if [[ $require_prefix == true ]]; then
+    [[ $value =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]] || return 1
+  else
+    [[ $value =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]] || return 1
+  fi
+
+  ip=${value%%/*}
+  if [[ $value == */* ]]; then
+    prefix=${value#*/}
+    (( prefix >= 0 && prefix <= 32 )) || return 1
+  fi
+
+  IFS='.' read -r -a octets <<< "$ip"
+  (( ${#octets[@]} == 4 )) || return 1
+  for octet in "${octets[@]}"; do
+    (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
+  done
+}
+
 if [[ ! $PORT =~ ^[1-9][0-9]{0,4}$ ]] || (( PORT > 65535 )); then
   echo "VOIDLING_PORT must be an integer from 1 to 65535." >&2
   exit 2
 fi
 
-if [[ -z $LAN_CIDR || ! $LAN_CIDR =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; then
+if [[ -z $LAN_CIDR ]] || ! valid_ipv4_cidr "$LAN_CIDR" true; then
   echo "Usage: sudo ./scripts/configure-firewall.sh [add|remove|replace] <lan-cidr> [previous-client ...]" >&2
   exit 2
 fi
@@ -36,7 +60,7 @@ case "$MODE" in
     ;;
   replace)
     for previous in "${@:3}"; do
-      if [[ ! $previous =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]]; then
+      if ! valid_ipv4_cidr "$previous" false; then
         echo "Invalid previous client or CIDR: $previous" >&2
         exit 2
       fi

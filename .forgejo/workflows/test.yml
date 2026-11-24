@@ -15,6 +15,6 @@ jobs:
       - uses: https://github.com/actions/checkout@v6
       - uses: https://github.com/actions/setup-node@v6
         with:
-          node-version: 22
-          cache: npm
+          node-version: 24
+      - run: npm run check
       - run: npm test

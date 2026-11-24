@@ -13,7 +13,7 @@ and `#D15517` color palette.
 
 Requirements:
 
-- Node.js 22 or newer
+- Node.js 24 or newer
 - authenticated Antigravity CLI (`agy`)
 - `yt-dlp`
 - `ffmpeg` and `ffprobe`
@@ -174,7 +174,7 @@ and `remove` only removes that helper-managed subnet/port rule. Rerun `add` if
 Node moves to a different executable path.
 
 To replace an earlier subnet, use
-`npm run firewall -- replace 10.10.1.0/24 192.168.1.0/24`. The Windows helper
+`npm run firewall -- replace 198.51.100.0/24 192.168.1.0/24`. The Windows helper
 only removes its own named rules for the previous clients. Firewall rules do
 not change the application's client allowlist: also run `configure-lan` for
 the intended subnet and restart the server. The web application never changes
@@ -264,9 +264,11 @@ Generated data is ignored by Git and stored under `data/`:
 - `data/request-log.md` — append-only parent audit log
 - `data/admin-auth.json` — salted Dad password hash, readable only by this user
 
-The audit log is never served by the web application. It records request time,
-game, searched guide, requesting client IP, success/failure, the video served,
-canonical YouTube URL, and the Antigravity selection response. Example:
+The audit log is never exposed to kid-facing routes; authenticated Dad sessions
+can review guide history and recent administrative events in `/dad`. Each entry
+records request time, game, searched guide, requesting client IP,
+success/failure, the video served, canonical YouTube URL, and the Antigravity
+selection response. Example:
 
 ```text
 [2026-01-01T18:30:00.000Z - SERVED - Example Game - Example Guide - Example guide title - client=192.168.1.42 - https://www.youtube.com/watch?v=VIDEO_ID - AGY=SELECT|SAFE|EXACT|VIDEO_ID|Example Guide|Exact guide]
@@ -291,14 +293,16 @@ layout.
 ## Development
 
 ```bash
+npm run check
 npm test
 npm run doctor
-node --check server.js
 ```
 
-There is no compilation/build step or runtime npm dependency. `npm test`
-includes temporary-file HTTP tests for Dad authentication, mutations,
-dependency checks, stable identity, and approval/history retention.
+There is no compilation/build step or runtime npm dependency. `npm run check`
+validates JavaScript and Bash syntax, executable permissions, whitespace, and
+source hygiene. `npm test` includes temporary-file HTTP tests for Dad
+authentication, mutations, dependency checks, stable identity, and
+approval/history retention.
 
 For optional desktop/mobile browser checks, reuse an installed Playwright or
 Playwright Core package with its Chromium browser:
@@ -312,19 +316,20 @@ fixture. It stubs video metadata/download work, checks save/cancel, visible
 errors, history, persistence, and layout overflow, and prints screenshot paths.
 It never reads or writes production data.
 
-GitHub Actions run the Node test suite and a full-history Gitleaks scan on pushes
-and pull requests. Keep all machine-specific settings, approved games, request
-history, authentication data, and downloaded media under the ignored `data/`
-directory.
+Forgejo and GitHub Actions run `npm run check`, `npm test`, and full-history
+Gitleaks scans on pushes and pull requests. Keep all machine-specific settings,
+approved games, request history, authentication data, and downloaded media under
+the ignored `data/` directory.
 
 The service intentionally has no runtime npm dependencies. Its HTTP surface is
-limited to static site assets, three kid-facing read APIs, the request and
-confirmation APIs, registered completed-video playback with HTTP byte ranges,
-and the separately authenticated Dad routes available to approved LAN clients.
+limited to static site assets, three kid-facing read APIs, the SSE `/api/events`
+stream, the request and confirmation APIs, registered completed-video playback
+with HTTP byte ranges, and the separately authenticated Dad routes available to
+approved LAN clients.
 
-## Local CI migration
+## Local CI
 
-The `.forgejo/workflows/` checks run on the isolated Linux worker with one job
-at a time. GitHub workflows stay available until the matching Forgejo checks
-pass; GitHub remains the issue, pull-request and release archive. Build jobs
-do not receive production deployment credentials.
+The `.forgejo/workflows/` checks run `npm run check`, `npm test`, and the
+Gitleaks full-history scan on the isolated Linux worker. GitHub workflows remain
+mirrored alongside them. Build jobs do not receive production deployment
+credentials.

@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-'use strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../src/fs-utils.js';
+import { ipv4Number, parseCidr } from '../src/network.js';
 
-const path = require('path');
-const { spawnSync } = require('child_process');
-const { ipv4Number, parseCidr } = require('../src/network');
-
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const USAGE = 'Usage: npm run firewall -- <add|remove|replace> <lan-cidr> [previous-client ...]';
 
-function configureFirewall(args, {
+export function configureFirewall(args, {
   platform = process.platform,
   env = process.env,
   nodePath = process.execPath,
@@ -28,13 +29,15 @@ function configureFirewall(args, {
   let commandArgs;
   if (platform === 'win32') {
     command = 'powershell.exe';
-    commandArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-      path.join(__dirname, 'configure-firewall.ps1'),
-      '-Mode', mode, '-LanCidr', cidr, '-Port', port, '-Program', nodePath];
+    commandArgs = [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+      path.join(SCRIPT_DIR, 'configure-firewall.ps1'),
+      '-Mode', mode, '-LanCidr', cidr, '-Port', port, '-Program', nodePath
+    ];
     if (previous.length) commandArgs.push('-PreviousClients', previous.join(','));
   } else if (platform === 'linux') {
     command = 'sudo';
-    commandArgs = ['bash', path.join(__dirname, 'configure-firewall.sh'), mode, cidr, ...previous];
+    commandArgs = ['bash', path.join(SCRIPT_DIR, 'configure-firewall.sh'), mode, cidr, ...previous];
   } else {
     throw new Error(`Automatic firewall setup supports Windows Firewall and Linux UFW, not ${platform}.`);
   }
@@ -46,7 +49,7 @@ function configureFirewall(args, {
   }
 }
 
-if (require.main === module) {
+if (isMainModule(import.meta.url)) {
   try {
     configureFirewall(process.argv.slice(2));
   } catch (error) {
@@ -54,5 +57,3 @@ if (require.main === module) {
     process.exitCode = 1;
   }
 }
-
-module.exports = { configureFirewall };

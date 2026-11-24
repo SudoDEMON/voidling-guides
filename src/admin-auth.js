@@ -1,15 +1,17 @@
-'use strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import { promisify } from 'node:util';
+import { writeFileAtomic } from './fs-utils.js';
 
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-
+const scryptAsync = promisify(crypto.scrypt);
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const ADMIN_COOKIE = 'voidling_dad';
 const ADMIN_SESSION_MS = 8 * 60 * 60 * 1000;
 
-function dadPostAllowed(req) {
+export function dadPostAllowed(req) {
   if (!String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')) return false;
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (fetchSite && fetchSite !== 'same-origin') return false;
   try {
     const origin = new URL(String(req.headers.origin || ''));
     return ['http:', 'https:'].includes(origin.protocol) && origin.host === req.headers.host;
@@ -26,22 +28,36 @@ function cookieValue(req, name = ADMIN_COOKIE) {
   return '';
 }
 
-class AdminSessions {
-  constructor(ttl = ADMIN_SESSION_MS) {
+export class AdminSessions {
+  constructor(ttl = ADMIN_SESSION_MS, maxSessions = 64) {
     this.ttl = ttl;
+    this.maxSessions = maxSessions;
     this.sessions = new Map();
+  }
+
+  prune(now = Date.now()) {
+    for (const [token, expires] of this.sessions) {
+      if (expires <= now) this.sessions.delete(token);
+    }
   }
 
   authenticated(req) {
     const now = Date.now();
-    for (const [token, expires] of this.sessions) if (expires <= now) this.sessions.delete(token);
+    this.prune(now);
     const token = cookieValue(req);
     return Boolean(token && (this.sessions.get(token) || 0) > now);
   }
 
   create() {
+    const now = Date.now();
+    this.prune(now);
+    while (this.sessions.size >= this.maxSessions) {
+      const oldest = this.sessions.keys().next().value;
+      if (oldest === undefined) break;
+      this.sessions.delete(oldest);
+    }
     const token = crypto.randomBytes(32).toString('base64url');
-    this.sessions.set(token, Date.now() + this.ttl);
+    this.sessions.set(token, now + this.ttl);
     return token;
   }
 
@@ -50,8 +66,8 @@ class AdminSessions {
     if (token) this.sessions.delete(token);
   }
 
-  cookie(token, maxAge = Math.floor(this.ttl / 1000)) {
-    return `${ADMIN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/dad; Max-Age=${maxAge}`;
+  cookie(token, maxAge = Math.floor(this.ttl / 1000), { secure = false } = {}) {
+    return `${ADMIN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/dad; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
   }
 }
 
@@ -68,16 +84,12 @@ function passwordRecord(password, salt = crypto.randomBytes(16)) {
   return { version: 1, algorithm: 'scrypt', salt: salt.toString('base64'), hash: hash.toString('base64') };
 }
 
-function writePassword(filePath, password) {
+export function writePassword(filePath, password) {
   const record = passwordRecord(password);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temporary = `${filePath}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, filePath);
-  fs.chmodSync(filePath, 0o600);
+  writeFileAtomic(filePath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
 }
 
-function readRecord(filePath) {
+export function readRecord(filePath) {
   if (!fs.existsSync(filePath)) return null;
   const record = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (!record || record.version !== 1 || record.algorithm !== 'scrypt' || !record.salt || !record.hash) {
@@ -86,15 +98,10 @@ function readRecord(filePath) {
   return record;
 }
 
-function verifyPassword(filePath, password) {
+export async function verifyPassword(filePath, password) {
   const record = readRecord(filePath);
   if (!record || typeof password !== 'string' || password.length > 256) return false;
   const expected = Buffer.from(record.hash, 'base64');
-  const actual = crypto.scryptSync(password, Buffer.from(record.salt, 'base64'), expected.length, SCRYPT_OPTIONS);
+  const actual = await scryptAsync(password, Buffer.from(record.salt, 'base64'), expected.length, SCRYPT_OPTIONS);
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
-
-module.exports = {
-  AdminSessions, dadPostAllowed,
-  passwordRecord, readRecord, validatePassword, verifyPassword, writePassword
-};

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-'use strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { writePassword } from '../src/admin-auth.js';
 
-const path = require('path');
-const { writePassword } = require('../src/admin-auth');
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function secretPrompt(label) {
   if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== 'function') {
@@ -14,12 +15,13 @@ function secretPrompt(label) {
     process.stdin.setEncoding('utf8');
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    const finish = (error) => {
+    const finish = error => {
       process.stdin.setRawMode(false);
       process.stdin.pause();
       process.stdin.removeListener('data', onData);
       process.stdout.write('\n');
-      if (error) reject(error); else resolve(value);
+      if (error) reject(error);
+      else resolve(value);
     };
     const onData = chunk => {
       for (const character of chunk) {
@@ -44,7 +46,7 @@ function secretPrompt(label) {
   const first = await secretPrompt('New Dad password: ');
   const second = await secretPrompt('Confirm Dad password: ');
   if (first !== second) throw new Error('Passwords did not match.');
-  const target = path.join(__dirname, '..', 'data', 'admin-auth.json');
+  const target = path.join(ROOT_DIR, 'data', 'admin-auth.json');
   writePassword(target, first);
   console.log(`Dad password saved securely in ${target}`);
   console.log('Open /dad at the Voidling Guides address from an allowed LAN device.');

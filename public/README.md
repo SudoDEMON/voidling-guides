@@ -1,6 +1,6 @@
 # VOiDling Assets
 
-This folder contains the sprite sheet currently installed for the custom ChatGPT Work pet **VOiDling**.
+This folder contains the sprite sheet currently installed for the **VOiDling** mascot.
 
 ## Character
 

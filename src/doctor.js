@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-'use strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { installAgy } from '../scripts/install-agy.js';
+import { readRecord } from './admin-auth.js';
+import { findAgy } from './agy.js';
+import { loadCatalog } from './catalog.js';
+import { isMainModule } from './fs-utils.js';
+import { ensureLocalCatalog, loadSettings } from './settings.js';
 
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const { findAgy, installAgy } = require('../scripts/install-agy');
-const { readRecord } = require('./admin-auth');
-const { loadCatalog } = require('./catalog');
-const { ensureLocalCatalog, loadSettings } = require('./settings');
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-async function runDoctor({
-  root = path.resolve(__dirname, '..'),
+export async function runDoctor({
+  root = ROOT_DIR,
   platform = process.platform,
   env = process.env,
   run = spawnSync,
@@ -24,7 +27,7 @@ async function runDoctor({
     if (!ok) failed = true;
   }
 
-  check('Node.js', Number(process.versions.node.split('.')[0]) >= 22, process.version);
+  check('Node.js', Number(process.versions.node.split('.')[0]) >= 24, process.version);
   for (const command of ['agy', 'yt-dlp', 'ffmpeg', 'ffprobe']) {
     const args = command === 'ffmpeg' || command === 'ffprobe' ? ['-version'] : ['--version'];
     const probeOptions = { env, encoding: 'utf8', timeout: 5000 };
@@ -95,7 +98,7 @@ async function runDoctor({
   return failed ? 1 : 0;
 }
 
-if (require.main === module) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
     console.log('Usage: npm run doctor [-- --check-only]\nInstalls a missing agy by default. --check-only disables installation and local-data initialization.');
@@ -111,5 +114,3 @@ if (require.main === module) {
     });
   }
 }
-
-module.exports = { runDoctor };
